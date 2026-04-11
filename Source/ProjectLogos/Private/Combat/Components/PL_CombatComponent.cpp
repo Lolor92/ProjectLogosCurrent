@@ -7,6 +7,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Component/PL_CharacterMovementComponent.h"
+#include "DrawDebugHelpers.h"
 #include "GameFramework/Controller.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
@@ -415,7 +416,7 @@ void UPL_CombatComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	DebugSweepActiveHitWindow();
 }
 
-void UPL_CombatComponent::RunHitDebugQuery(const FVector& StartLocation, const FVector& EndLocation, bool bDrawDebug)
+void UPL_CombatComponent::RunHitDebugQuery(const FTransform& StartTransform, const FTransform& EndTransform, bool bDrawDebug)
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -423,12 +424,64 @@ void UPL_CombatComponent::RunHitDebugQuery(const FVector& StartLocation, const F
 		return;
 	}
 
-	constexpr float SweepRadius = 18.f;
+	const FVector StartLocation = StartTransform.GetLocation();
+	const FVector EndLocation = EndTransform.GetLocation();
+	const FQuat StartRotation = StartTransform.GetRotation();
+	const FQuat EndRotation = EndTransform.GetRotation();
+	const FQuat SweepRotation = EndTransform.GetRotation();
+	const float SphereRadius = FMath::Max(0.f, ActiveHitShapeSettings.SphereRadius);
+	const float CapsuleRadius = FMath::Max(0.f, ActiveHitShapeSettings.CapsuleRadius);
+	const float CapsuleHalfHeight = FMath::Max(CapsuleRadius, ActiveHitShapeSettings.CapsuleHalfHeight);
+	const FVector BoxHalfExtent = ActiveHitShapeSettings.BoxHalfExtent.ComponentMax(FVector::ZeroVector);
+
+	FCollisionShape CollisionShape;
+	switch (ActiveHitShapeSettings.ShapeType)
+	{
+	case EPLHitDetectionShapeType::Capsule:
+		CollisionShape = FCollisionShape::MakeCapsule(CapsuleRadius, CapsuleHalfHeight);
+		break;
+
+	case EPLHitDetectionShapeType::Box:
+		CollisionShape = FCollisionShape::MakeBox(BoxHalfExtent);
+		break;
+
+	case EPLHitDetectionShapeType::Sphere:
+	default:
+		CollisionShape = FCollisionShape::MakeSphere(SphereRadius);
+		break;
+	}
 
 	if (bDrawDebug)
 	{
-		DrawDebugSphere(World, EndLocation, SweepRadius, 12, FColor::Blue, false, 0.1f, 0, 1.5f);
+		switch (ActiveHitShapeSettings.ShapeType)
+		{
+		case EPLHitDetectionShapeType::Capsule:
+			DrawDebugCapsule(World, EndLocation, CapsuleHalfHeight, CapsuleRadius, SweepRotation,
+				FColor::Blue, false, 0.1f, 0, 1.5f);
+			break;
+
+		case EPLHitDetectionShapeType::Box:
+			DrawDebugBox(World, EndLocation, BoxHalfExtent, SweepRotation, FColor::Blue,
+				false, 0.1f, 0, 1.5f);
+			break;
+
+		case EPLHitDetectionShapeType::Sphere:
+		default:
+			DrawDebugSphere(World, EndLocation, SphereRadius, 12, FColor::Blue, false, 0.1f, 0, 1.5f);
+			break;
+		}
+
 		DrawDebugLine(World, StartLocation, EndLocation, FColor::Cyan, false, 0.1f, 0, 1.0f);
+		DrawDebugDirectionalArrow(
+			World,
+			EndLocation,
+			EndLocation + (EndTransform.GetUnitAxis(EAxis::X) * 30.f),
+			12.f,
+			FColor::Green,
+			false,
+			0.1f,
+			0,
+			1.0f);
 	}
 
 	FCollisionObjectQueryParams ObjectQueryParams;
@@ -437,41 +490,61 @@ void UPL_CombatComponent::RunHitDebugQuery(const FVector& StartLocation, const F
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PLHitDebugSweep), false, GetOwner());
 	QueryParams.AddIgnoredActor(GetOwner());
 
-	TArray<FHitResult> HitResults;
-	World->SweepMultiByObjectType(
-		HitResults,
-		StartLocation,
-		EndLocation,
-		FQuat::Identity,
-		ObjectQueryParams,
-		FCollisionShape::MakeSphere(SweepRadius),
-		QueryParams);
+	const double RotationDeltaDegrees = FMath::RadiansToDegrees(StartRotation.AngularDistance(EndRotation));
+	const double LargestShapeExtent = FMath::Max(
+		FMath::Max(static_cast<double>(SphereRadius), static_cast<double>(CapsuleHalfHeight)),
+		BoxHalfExtent.GetMax());
+	const double DistanceStepSize = FMath::Max(20.0, LargestShapeExtent * 0.75);
+	const int32 DistanceSteps = FMath::Clamp(FMath::CeilToInt(FVector::Distance(StartLocation, EndLocation) / DistanceStepSize), 1, 4);
+	const int32 RotationSteps = FMath::Clamp(FMath::CeilToInt(RotationDeltaDegrees / 15.f), 1, 4);
+	const int32 NumSubsteps = FMath::Clamp(FMath::Max(DistanceSteps, RotationSteps), 1, 4);
 
-	for (const FHitResult& Hit : HitResults)
+	for (int32 StepIndex = 1; StepIndex <= NumSubsteps; ++StepIndex)
 	{
-		AActor* HitActor = Hit.GetActor();
-		if (!HitActor || HitActor == GetOwner())
+		const float PrevAlpha = static_cast<float>(StepIndex - 1) / static_cast<float>(NumSubsteps);
+		const float CurrAlpha = static_cast<float>(StepIndex) / static_cast<float>(NumSubsteps);
+
+		const FVector SegmentStartLocation = FMath::Lerp(StartLocation, EndLocation, PrevAlpha);
+		const FVector SegmentEndLocation = FMath::Lerp(StartLocation, EndLocation, CurrAlpha);
+		const FQuat SegmentRotation = FQuat::Slerp(StartRotation, EndRotation, CurrAlpha).GetNormalized();
+
+		TArray<FHitResult> HitResults;
+		World->SweepMultiByObjectType(
+			HitResults,
+			SegmentStartLocation,
+			SegmentEndLocation,
+			SegmentRotation,
+			ObjectQueryParams,
+			CollisionShape,
+			QueryParams);
+
+		for (const FHitResult& Hit : HitResults)
 		{
-			continue;
+			AActor* HitActor = Hit.GetActor();
+			if (!HitActor || HitActor == GetOwner())
+			{
+				continue;
+			}
+
+			const TWeakObjectPtr<AActor> WeakHitActor(HitActor);
+			if (HitActorsThisWindow.Contains(WeakHitActor))
+			{
+				continue;
+			}
+
+			HitActorsThisWindow.Add(WeakHitActor);
+
+			TryApplyHitGameplayEffects(HitActor, Hit);
+
+			UE_LOG(LogPLCombatHitDetection, Warning,
+				TEXT("[%s] Debug sweep hit %s | Socket=%s | Prev=%s | Curr=%s | Substeps=%d"),
+				*GetNameSafe(GetOwner()),
+				*GetNameSafe(HitActor),
+				ActiveHitDebugSocketName.IsNone() ? TEXT("None") : *ActiveHitDebugSocketName.ToString(),
+				*StartLocation.ToString(),
+				*EndLocation.ToString(),
+				NumSubsteps);
 		}
-
-		const TWeakObjectPtr<AActor> WeakHitActor(HitActor);
-		if (HitActorsThisWindow.Contains(WeakHitActor))
-		{
-			continue;
-		}
-
-		HitActorsThisWindow.Add(WeakHitActor);
-		
-		TryApplyHitGameplayEffects(HitActor, Hit);
-
-		UE_LOG(LogPLCombatHitDetection, Warning,
-			TEXT("[%s] Debug sweep hit %s | Socket=%s | Prev=%s | Curr=%s"),
-			*GetNameSafe(GetOwner()),
-			*GetNameSafe(HitActor),
-			ActiveHitDebugSocketName.IsNone() ? TEXT("None") : *ActiveHitDebugSocketName.ToString(),
-			*StartLocation.ToString(),
-			*EndLocation.ToString());
 	}
 }
 
@@ -483,44 +556,52 @@ void UPL_CombatComponent::DebugSweepActiveHitWindow()
 		return;
 	}
 
-	const FVector CurrentLocation = GetHitDebugSocketLocation(ActiveHitDebugMesh, ActiveHitDebugSocketName);
+	const FTransform CurrentTransform = GetHitTraceWorldTransform(
+		ActiveHitDebugMesh,
+		ActiveHitDebugSocketName,
+		ActiveHitShapeSettings);
 
 	if (!bHasPreviousHitDebugLocation)
 	{
-		PreviousHitDebugLocation = CurrentLocation;
+		PreviousHitDebugTransform = CurrentTransform;
 		bHasPreviousHitDebugLocation = true;
 	}
 
-	RunHitDebugQuery(PreviousHitDebugLocation, CurrentLocation, true);
-	PreviousHitDebugLocation = CurrentLocation;
+	RunHitDebugQuery(PreviousHitDebugTransform, CurrentTransform, true);
+	PreviousHitDebugTransform = CurrentTransform;
 }
 
 void UPL_CombatComponent::ResetActiveHitDebugWindow()
 {
 	ActiveHitDebugMesh = nullptr;
 	ActiveHitDebugSocketName = NAME_None;
-	PreviousHitDebugLocation = FVector::ZeroVector;
+	PreviousHitDebugTransform = FTransform::Identity;
 	bHitDebugWindowActive = false;
 	bHasPreviousHitDebugLocation = false;
 	HitActorsThisWindow.Reset();
 	ActiveHitDebugWindowDepth = 0;
+	ActiveHitShapeSettings = FPLHitWindowShapeSettings();
 	ActiveGameplayEffectsToApply.Reset();
 	SetComponentTickEnabled(false);
 }
 
-FVector UPL_CombatComponent::GetHitDebugSocketLocation(USkeletalMeshComponent* MeshComp, FName SocketName) const
+FTransform UPL_CombatComponent::GetHitTraceWorldTransform(USkeletalMeshComponent* MeshComp, FName SocketName,
+	const FPLHitWindowShapeSettings& HitShapeSettings) const
 {
 	if (!MeshComp)
 	{
-		return FVector::ZeroVector;
+		return FTransform::Identity;
 	}
 
-	if (!SocketName.IsNone() && MeshComp->DoesSocketExist(SocketName))
-	{
-		return MeshComp->GetSocketLocation(SocketName);
-	}
+	const FTransform BaseTransform =
+		(!SocketName.IsNone() && MeshComp->DoesSocketExist(SocketName))
+			? MeshComp->GetSocketTransform(SocketName)
+			: MeshComp->GetComponentTransform();
 
-	return MeshComp->GetComponentLocation();
+	return FTransform(
+		BaseTransform.TransformRotation(HitShapeSettings.LocalRotation.Quaternion()),
+		BaseTransform.TransformPosition(HitShapeSettings.LocalOffset),
+		FVector::OneVector);
 }
 
 void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult)
@@ -562,7 +643,8 @@ void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHi
 }
 
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
-	FName DebugSocketName, const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply)
+	FName DebugSocketName, const FPLHitWindowShapeSettings& HitShapeSettings,
+	const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply)
 {
 	if (!NotifyState || !MeshComp) return false;
 
@@ -581,15 +663,6 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* Notify
 		Cast<UPL_CharacterMovementComponent>(OwningCharacter ? OwningCharacter->GetCharacterMovement() : nullptr);
 
 	const FString SocketName = DebugSocketName.IsNone() ? TEXT("None") : DebugSocketName.ToString();
-
-	// UE_LOG(LogPLCombatHitDetection, Log,
-	// 	TEXT("[%s] Hit window BEGIN | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
-	// 	*GetNameSafe(OwnerActor),
-	// 	*GetNameSafe(MeshComp),
-	// 	*SocketName,
-	// 	ActiveHitDetectionWindows.Num(),
-	// 	(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
-	// 	(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
 	
 	if (!DebugSocketName.IsNone() && !MeshComp->DoesSocketExist(DebugSocketName))
 	{
@@ -601,13 +674,14 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* Notify
 
 	ActiveHitDebugMesh = MeshComp;
 	ActiveHitDebugSocketName = DebugSocketName;
+	ActiveHitShapeSettings = HitShapeSettings;
 	ActiveGameplayEffectsToApply = GameplayEffectsToApply;
 	HitActorsThisWindow.Reset();
 
-	const FVector InitialLocation = GetHitDebugSocketLocation(MeshComp, DebugSocketName);
-	RunHitDebugQuery(InitialLocation, InitialLocation, false);
+	const FTransform InitialTransform = GetHitTraceWorldTransform(MeshComp, DebugSocketName, HitShapeSettings);
+	RunHitDebugQuery(InitialTransform, InitialTransform, false);
 
-	PreviousHitDebugLocation = InitialLocation;
+	PreviousHitDebugTransform = InitialTransform;
 	bHasPreviousHitDebugLocation = true;
 	bHitDebugWindowActive = true;
 	SetComponentTickEnabled(true);
@@ -649,15 +723,6 @@ void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifySt
 		Cast<UPL_CharacterMovementComponent>(OwningCharacter ? OwningCharacter->GetCharacterMovement() : nullptr);
 
 	const FString SocketNameString = SocketName.IsNone() ? TEXT("None") : SocketName.ToString();
-
-	// UE_LOG(LogPLCombatHitDetection, Log,
-	// 	TEXT("[%s] Hit window END | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
-	// 	*GetNameSafe(OwnerActor),
-	// 	*GetNameSafe(MeshComp),
-	// 	*SocketNameString,
-	// 	ActiveHitDetectionWindows.Num(),
-	// 	(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
-	// 	(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
 	
 	if (ActiveHitDebugWindowDepth == 0)
 	{

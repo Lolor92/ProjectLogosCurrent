@@ -48,7 +48,8 @@ public:
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
 	
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
-		FName DebugSocketName, const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
+		FName DebugSocketName, const FPLHitWindowShapeSettings& HitShapeSettings,
+		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
 	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
 
 protected:
@@ -120,22 +121,24 @@ private:
 	
 	TMap<FObjectKey, FName> ActiveHitDetectionWindows;
 	
-	void RunHitDebugQuery(const FVector& StartLocation, const FVector& EndLocation, bool bDrawDebug);
+	void RunHitDebugQuery(const FTransform& StartTransform, const FTransform& EndTransform, bool bDrawDebug);
 	void DebugSweepActiveHitWindow();
 	void ResetActiveHitDebugWindow();
-	FVector GetHitDebugSocketLocation(USkeletalMeshComponent* MeshComp, FName SocketName) const;
+	FTransform GetHitTraceWorldTransform(USkeletalMeshComponent* MeshComp, FName SocketName,
+		const FPLHitWindowShapeSettings& HitShapeSettings) const;
 	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
 
 	UPROPERTY(Transient)
 	TObjectPtr<USkeletalMeshComponent> ActiveHitDebugMesh = nullptr;
 
 	FName ActiveHitDebugSocketName = NAME_None;
-	FVector PreviousHitDebugLocation = FVector::ZeroVector;
+	FTransform PreviousHitDebugTransform = FTransform::Identity;
 	bool bHitDebugWindowActive = false;
 	bool bHasPreviousHitDebugLocation = false;
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisWindow;
 	
 	TMap<FObjectKey, int32> ActiveHitDetectionWindowCounts;
 	int32 ActiveHitDebugWindowDepth = 0;
+	FPLHitWindowShapeSettings ActiveHitShapeSettings;
 	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
 };
