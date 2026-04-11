@@ -495,9 +495,9 @@ void UPL_CombatComponent::RunHitDebugQuery(const FTransform& StartTransform, con
 		FMath::Max(static_cast<double>(SphereRadius), static_cast<double>(CapsuleHalfHeight)),
 		BoxHalfExtent.GetMax());
 	const double DistanceStepSize = FMath::Max(20.0, LargestShapeExtent * 0.75);
-	const int32 DistanceSteps = FMath::Clamp(FMath::CeilToInt(FVector::Distance(StartLocation, EndLocation) / DistanceStepSize), 1, 4);
-	const int32 RotationSteps = FMath::Clamp(FMath::CeilToInt(RotationDeltaDegrees / 15.f), 1, 4);
-	const int32 NumSubsteps = FMath::Clamp(FMath::Max(DistanceSteps, RotationSteps), 1, 4);
+	const int32 DistanceSteps = FMath::Clamp(FMath::CeilToInt(FVector::Distance(StartLocation, EndLocation) / DistanceStepSize), 1, 6);
+	const int32 RotationSteps = FMath::Clamp(FMath::CeilToInt(RotationDeltaDegrees / 15.f), 1, 6);
+	const int32 NumSubsteps = FMath::Clamp(FMath::Max(DistanceSteps, RotationSteps), 1, 6);
 
 	for (int32 StepIndex = 1; StepIndex <= NumSubsteps; ++StepIndex)
 	{
@@ -696,6 +696,17 @@ void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifySt
 	AActor* OwnerActor = GetOwner();
 	if (!OwnerActor || MeshComp->GetOwner() != OwnerActor) return;
 	if (!OwnerActor->HasAuthority()) return;
+
+	if (bHitDebugWindowActive && ActiveHitDebugMesh && bHasPreviousHitDebugLocation)
+	{
+		const FTransform CurrentTransform = GetHitTraceWorldTransform(
+			ActiveHitDebugMesh,
+			ActiveHitDebugSocketName,
+			ActiveHitShapeSettings);
+
+		RunHitDebugQuery(PreviousHitDebugTransform, CurrentTransform, false);
+		PreviousHitDebugTransform = CurrentTransform;
+	}
 
 	const FObjectKey NotifyKey(NotifyState);
 	const FName SocketName = ActiveHitDetectionWindows.Contains(NotifyKey)
