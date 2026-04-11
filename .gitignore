@@ -1,0 +1,23 @@
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.idea/
+
+*.VC.db
+*.VC.opendb
+*.suo
+*.opensdf
+*.sdf
+*.tmp
+*.log
+
+ProjectLogos.uproject.DotSettings.user
+
+# Keep large content and editor-only assets out of source control by default.
+Content/Asset/
+Content/Blueprint/
+Content/Map/
+Content/Over300FlatIconsSkills/
