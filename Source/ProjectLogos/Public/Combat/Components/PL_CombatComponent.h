@@ -4,10 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "ActiveGameplayEffectHandle.h"
+#include "Combat/AnimNotifies/PL_HitDetectionNotifyState.h"
 #include "Combat/Data/PL_AbilitySet.h"
 #include "Combat/Data/PL_TagReactionData.h"
 #include "Components/ActorComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
 #include "PL_CombatComponent.generated.h"
@@ -47,10 +47,14 @@ public:
 	void DeinitializeCombat();
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
 	
-	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp, FName DebugSocketName);
+	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
+		FName DebugSocketName, const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
 	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
 
 protected:
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
+		FActorComponentTickFunction* ThisTickFunction) override;
+	
 	// Default abilities.
 	UPROPERTY(EditDefaultsOnly, Category="Ability")
 	TArray<TObjectPtr<UPL_AbilitySet>> DefaultAbilitySets;
@@ -115,4 +119,23 @@ private:
 	bool bAirborneEffectApplied = false;
 	
 	TMap<FObjectKey, FName> ActiveHitDetectionWindows;
+	
+	void RunHitDebugQuery(const FVector& StartLocation, const FVector& EndLocation, bool bDrawDebug);
+	void DebugSweepActiveHitWindow();
+	void ResetActiveHitDebugWindow();
+	FVector GetHitDebugSocketLocation(USkeletalMeshComponent* MeshComp, FName SocketName) const;
+	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
+
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> ActiveHitDebugMesh = nullptr;
+
+	FName ActiveHitDebugSocketName = NAME_None;
+	FVector PreviousHitDebugLocation = FVector::ZeroVector;
+	bool bHitDebugWindowActive = false;
+	bool bHasPreviousHitDebugLocation = false;
+	TSet<TWeakObjectPtr<AActor>> HitActorsThisWindow;
+	
+	TMap<FObjectKey, int32> ActiveHitDetectionWindowCounts;
+	int32 ActiveHitDebugWindowDepth = 0;
+	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
 };

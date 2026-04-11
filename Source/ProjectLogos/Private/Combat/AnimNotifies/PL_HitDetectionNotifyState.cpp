@@ -27,9 +27,15 @@ void UPL_HitDetectionNotifyState::NotifyBegin(USkeletalMeshComponent* MeshComp, 
 {
 	Super::NotifyBegin(MeshComp, Animation, TotalDuration, EventReference);
 
-	if (UPL_CombatComponent* CombatComponent = ResolveCombatComponent(MeshComp))
+	UPL_CombatComponent* CombatComponent = ResolveCombatComponent(MeshComp);
+
+	if (CombatComponent)
 	{
-		CombatComponent->BeginHitDetectionWindow(this, MeshComp, DebugSocketName);
+		CombatComponent->BeginHitDetectionWindow(
+			this,
+			MeshComp,
+			DebugSocketName,
+			GameplayEffectsToApply);
 	}
 }
 
@@ -38,7 +44,9 @@ void UPL_HitDetectionNotifyState::NotifyEnd(USkeletalMeshComponent* MeshComp, UA
 {
 	Super::NotifyEnd(MeshComp, Animation, EventReference);
 
-	if (UPL_CombatComponent* CombatComponent = ResolveCombatComponent(MeshComp))
+	UPL_CombatComponent* CombatComponent = ResolveCombatComponent(MeshComp);
+
+	if (CombatComponent)
 	{
 		CombatComponent->EndHitDetectionWindow(this, MeshComp);
 	}

@@ -11,13 +11,15 @@
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
 #include "TimerManager.h"
+#include "Combat/Utilities/PL_CombatFunctionLibrary.h"
 #include "UObject/UnrealType.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPLCombatHitDetection, Warning, All);
+DEFINE_LOG_CATEGORY_STATIC(LogPLCombatHitDetection, Log, All);
 
 UPL_CombatComponent::UPL_CombatComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	SetComponentTickEnabled(false);
 }
 
 void UPL_CombatComponent::InitializeCombat(APL_BaseCharacter* InCharacter,
@@ -43,6 +45,8 @@ void UPL_CombatComponent::DeinitializeCombat()
 	RemoveGameplayEffect(AirborneEffectHandle);
 	ClearDefaultAbilities();
 	ActiveHitDetectionWindows.Reset();
+	ActiveHitDetectionWindowCounts.Reset();
+	ResetActiveHitDebugWindow();
 
 	OwningCharacter = nullptr;
 	AbilitySystemComponent = nullptr;
@@ -398,8 +402,167 @@ void UPL_CombatComponent::RemoveGameplayEffect(FActiveGameplayEffectHandle& Effe
 	EffectHandle.Invalidate();
 }
 
+void UPL_CombatComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+	FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	
+	if (!bHitDebugWindowActive)
+	{
+		return;
+	}
+
+	DebugSweepActiveHitWindow();
+}
+
+void UPL_CombatComponent::RunHitDebugQuery(const FVector& StartLocation, const FVector& EndLocation, bool bDrawDebug)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	constexpr float SweepRadius = 18.f;
+
+	if (bDrawDebug)
+	{
+		DrawDebugSphere(World, EndLocation, SweepRadius, 12, FColor::Blue, false, 0.1f, 0, 1.5f);
+		DrawDebugLine(World, StartLocation, EndLocation, FColor::Cyan, false, 0.1f, 0, 1.0f);
+	}
+
+	FCollisionObjectQueryParams ObjectQueryParams;
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PLHitDebugSweep), false, GetOwner());
+	QueryParams.AddIgnoredActor(GetOwner());
+
+	TArray<FHitResult> HitResults;
+	World->SweepMultiByObjectType(
+		HitResults,
+		StartLocation,
+		EndLocation,
+		FQuat::Identity,
+		ObjectQueryParams,
+		FCollisionShape::MakeSphere(SweepRadius),
+		QueryParams);
+
+	for (const FHitResult& Hit : HitResults)
+	{
+		AActor* HitActor = Hit.GetActor();
+		if (!HitActor || HitActor == GetOwner())
+		{
+			continue;
+		}
+
+		const TWeakObjectPtr<AActor> WeakHitActor(HitActor);
+		if (HitActorsThisWindow.Contains(WeakHitActor))
+		{
+			continue;
+		}
+
+		HitActorsThisWindow.Add(WeakHitActor);
+		
+		TryApplyHitGameplayEffects(HitActor, Hit);
+
+		UE_LOG(LogPLCombatHitDetection, Warning,
+			TEXT("[%s] Debug sweep hit %s | Socket=%s | Prev=%s | Curr=%s"),
+			*GetNameSafe(GetOwner()),
+			*GetNameSafe(HitActor),
+			ActiveHitDebugSocketName.IsNone() ? TEXT("None") : *ActiveHitDebugSocketName.ToString(),
+			*StartLocation.ToString(),
+			*EndLocation.ToString());
+	}
+}
+
+void UPL_CombatComponent::DebugSweepActiveHitWindow()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ActiveHitDebugMesh)
+	{
+		ResetActiveHitDebugWindow();
+		return;
+	}
+
+	const FVector CurrentLocation = GetHitDebugSocketLocation(ActiveHitDebugMesh, ActiveHitDebugSocketName);
+
+	if (!bHasPreviousHitDebugLocation)
+	{
+		PreviousHitDebugLocation = CurrentLocation;
+		bHasPreviousHitDebugLocation = true;
+	}
+
+	RunHitDebugQuery(PreviousHitDebugLocation, CurrentLocation, true);
+	PreviousHitDebugLocation = CurrentLocation;
+}
+
+void UPL_CombatComponent::ResetActiveHitDebugWindow()
+{
+	ActiveHitDebugMesh = nullptr;
+	ActiveHitDebugSocketName = NAME_None;
+	PreviousHitDebugLocation = FVector::ZeroVector;
+	bHitDebugWindowActive = false;
+	bHasPreviousHitDebugLocation = false;
+	HitActorsThisWindow.Reset();
+	ActiveHitDebugWindowDepth = 0;
+	ActiveGameplayEffectsToApply.Reset();
+	SetComponentTickEnabled(false);
+}
+
+FVector UPL_CombatComponent::GetHitDebugSocketLocation(USkeletalMeshComponent* MeshComp, FName SocketName) const
+{
+	if (!MeshComp)
+	{
+		return FVector::ZeroVector;
+	}
+
+	if (!SocketName.IsNone() && MeshComp->DoesSocketExist(SocketName))
+	{
+		return MeshComp->GetSocketLocation(SocketName);
+	}
+
+	return MeshComp->GetComponentLocation();
+}
+
+void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult)
+{
+	if (!AbilitySystemComponent || !HitActor || HitActor == GetOwner() || ActiveGameplayEffectsToApply.IsEmpty())
+	{
+		return;
+	}
+	
+	UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor);
+	if (!TargetASC)
+	{
+		return;
+	}
+
+	FGameplayEffectContextHandle ContextHandle = AbilitySystemComponent->MakeEffectContext();
+	ContextHandle.AddSourceObject(this);
+	ContextHandle.AddHitResult(HitResult);
+
+	for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveGameplayEffectsToApply)
+	{
+		if (!GameplayEffectToApply.GameplayEffectClass)
+		{
+			continue;
+		}
+
+		const FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(
+			GameplayEffectToApply.GameplayEffectClass,
+			GameplayEffectToApply.EffectLevel,
+			ContextHandle);
+
+		if (!SpecHandle.IsValid())
+		{
+			continue;
+		}
+
+		AbilitySystemComponent->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+	}
+}
+
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
-	FName DebugSocketName)
+	FName DebugSocketName, const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply)
 {
 	if (!NotifyState || !MeshComp) return false;
 
@@ -407,21 +570,47 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* Notify
 	if (!OwnerActor || MeshComp->GetOwner() != OwnerActor) return false;
 	if (!OwnerActor->HasAuthority()) return false;
 	
-	ActiveHitDetectionWindows.FindOrAdd(FObjectKey(NotifyState)) = DebugSocketName;
+	const FObjectKey NotifyKey(NotifyState);
+	ActiveHitDetectionWindows.FindOrAdd(NotifyKey) = DebugSocketName;
+
+	int32& ActiveWindowCount = ActiveHitDetectionWindowCounts.FindOrAdd(NotifyKey);
+	++ActiveWindowCount;
+	++ActiveHitDebugWindowDepth;
 
 	const UPL_CharacterMovementComponent* MoveComp =
 		Cast<UPL_CharacterMovementComponent>(OwningCharacter ? OwningCharacter->GetCharacterMovement() : nullptr);
 
 	const FString SocketName = DebugSocketName.IsNone() ? TEXT("None") : DebugSocketName.ToString();
 
-	UE_LOG(LogPLCombatHitDetection, Log,
-		TEXT("[%s] Hit window BEGIN | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
-		*GetNameSafe(OwnerActor),
-		*GetNameSafe(MeshComp),
-		*SocketName,
-		ActiveHitDetectionWindows.Num(),
-		(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
-		(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
+	// UE_LOG(LogPLCombatHitDetection, Log,
+	// 	TEXT("[%s] Hit window BEGIN | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
+	// 	*GetNameSafe(OwnerActor),
+	// 	*GetNameSafe(MeshComp),
+	// 	*SocketName,
+	// 	ActiveHitDetectionWindows.Num(),
+	// 	(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
+	// 	(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
+	
+	if (!DebugSocketName.IsNone() && !MeshComp->DoesSocketExist(DebugSocketName))
+	{
+		UE_LOG(LogPLCombatHitDetection, Warning,
+			TEXT("[%s] Socket %s was not found. Falling back to mesh location."),
+			*GetNameSafe(OwnerActor),
+			*DebugSocketName.ToString());
+	}
+
+	ActiveHitDebugMesh = MeshComp;
+	ActiveHitDebugSocketName = DebugSocketName;
+	ActiveGameplayEffectsToApply = GameplayEffectsToApply;
+	HitActorsThisWindow.Reset();
+
+	const FVector InitialLocation = GetHitDebugSocketLocation(MeshComp, DebugSocketName);
+	RunHitDebugQuery(InitialLocation, InitialLocation, false);
+
+	PreviousHitDebugLocation = InitialLocation;
+	bHasPreviousHitDebugLocation = true;
+	bHitDebugWindowActive = true;
+	SetComponentTickEnabled(true);
 
 	return true;
 }
@@ -439,19 +628,39 @@ void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifySt
 		? ActiveHitDetectionWindows.FindChecked(NotifyKey)
 		: NAME_None;
 
-	ActiveHitDetectionWindows.Remove(NotifyKey);
+	if (int32* ActiveWindowCount = ActiveHitDetectionWindowCounts.Find(NotifyKey))
+	{
+		*ActiveWindowCount = FMath::Max(0, *ActiveWindowCount - 1);
+
+		if (*ActiveWindowCount == 0)
+		{
+			ActiveHitDetectionWindowCounts.Remove(NotifyKey);
+			ActiveHitDetectionWindows.Remove(NotifyKey);
+		}
+	}
+	else
+	{
+		ActiveHitDetectionWindows.Remove(NotifyKey);
+	}
+
+	ActiveHitDebugWindowDepth = FMath::Max(0, ActiveHitDebugWindowDepth - 1);
 
 	const UPL_CharacterMovementComponent* MoveComp =
 		Cast<UPL_CharacterMovementComponent>(OwningCharacter ? OwningCharacter->GetCharacterMovement() : nullptr);
 
 	const FString SocketNameString = SocketName.IsNone() ? TEXT("None") : SocketName.ToString();
 
-	UE_LOG(LogPLCombatHitDetection, Log,
-		TEXT("[%s] Hit window END | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
-		*GetNameSafe(OwnerActor),
-		*GetNameSafe(MeshComp),
-		*SocketNameString,
-		ActiveHitDetectionWindows.Num(),
-		(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
-		(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
+	// UE_LOG(LogPLCombatHitDetection, Log,
+	// 	TEXT("[%s] Hit window END | Mesh=%s | Socket=%s | ActiveWindows=%d | RootMotionSuppressed=%s | MoveInputSuppressed=%s"),
+	// 	*GetNameSafe(OwnerActor),
+	// 	*GetNameSafe(MeshComp),
+	// 	*SocketNameString,
+	// 	ActiveHitDetectionWindows.Num(),
+	// 	(MoveComp && MoveComp->IsAbilityRootMotionSuppressed()) ? TEXT("true") : TEXT("false"),
+	// 	(MoveComp && MoveComp->IsAbilityMovementInputSuppressed()) ? TEXT("true") : TEXT("false"));
+	
+	if (ActiveHitDebugWindowDepth == 0)
+	{
+		ResetActiveHitDebugWindow();
+	}
 }
