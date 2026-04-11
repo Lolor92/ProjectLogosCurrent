@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "ActiveGameplayEffectHandle.h"
-#include "Combat/AnimNotifies/PL_HitDetectionNotifyState.h"
+#include "Combat/Data/PL_HitWindowTypes.h"
 #include "Combat/Data/PL_AbilitySet.h"
 #include "Combat/Data/PL_TagReactionData.h"
 #include "Components/ActorComponent.h"
