@@ -51,6 +51,35 @@ struct FRepAbilityAnimState
 	}
 };
 
+USTRUCT(BlueprintType)
+struct FRepHitStopState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	uint8 bActive : 1;
+
+	UPROPERTY()
+	float TimeScale;
+
+	FRepHitStopState()
+		: bActive(false)
+		, TimeScale(0.f)
+	{
+	}
+
+	bool operator==(const FRepHitStopState& Other) const
+	{
+		return bActive == Other.bActive
+			&& FMath::IsNearlyEqual(TimeScale, Other.TimeScale);
+	}
+
+	bool operator!=(const FRepHitStopState& Other) const
+	{
+		return !(*this == Other);
+	}
+};
+
 UCLASS()
 class PROJECTLOGOS_API APL_BaseCharacter : public ACharacter, public IAbilitySystemInterface
 {
@@ -73,7 +102,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ability|Animation")
 	void ResetAbilityAnimState();
 
+	UFUNCTION(BlueprintCallable, Category="HitStop")
+	void SetHitStopState(const FRepHitStopState& NewState);
+
+	UFUNCTION(BlueprintCallable, Category="HitStop")
+	void ClearHitStopState();
+
 	const FRepAbilityAnimState& GetAbilityAnimState() const { return AbilityAnimState; }
+	const FRepHitStopState& GetHitStopState() const { return HitStopState; }
 	UPL_CombatComponent* GetCombatComponent() const { return CombatComponent; }
 
 protected:
@@ -86,13 +122,23 @@ protected:
 	UPROPERTY(ReplicatedUsing=OnRep_AbilityAnimState)
 	FRepAbilityAnimState AbilityAnimState;
 
+	UPROPERTY(ReplicatedUsing=OnRep_HitStopState)
+	FRepHitStopState HitStopState;
+
 	UFUNCTION(Server, Reliable)
 	void ServerSetAbilityAnimState(const FRepAbilityAnimState& NewState);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetHitStopState(const FRepHitStopState& NewState);
 
 	UFUNCTION()
 	void OnRep_AbilityAnimState();
 
+	UFUNCTION()
+	void OnRep_HitStopState();
+
 	void ApplyAbilityAnimState(const FRepAbilityAnimState& NewState);
+	void ApplyHitStopState(const FRepHitStopState& NewState);
 	
 	// GAS references. Player characters receive these from PlayerState.
 	UPROPERTY(BlueprintReadWrite)

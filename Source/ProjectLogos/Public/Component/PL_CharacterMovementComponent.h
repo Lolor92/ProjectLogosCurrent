@@ -17,6 +17,10 @@ public:
 	bool IsAbilityRootMotionSuppressed() const { return bAbilityRootMotionSuppressed; }
 	void RefreshAbilityRootMotionMode();
 
+	// Hit-stop root motion.
+	void SetHitStopRootMotionSuppressed(bool bInSuppressed);
+	bool IsHitStopRootMotionSuppressed() const { return bHitStopRootMotionSuppressed; }
+
 	// Ability movement input.
 	void SetAbilityMovementInputSuppressed(bool bInSuppressed);
 	bool IsAbilityMovementInputSuppressed() const { return bAbilityMovementInputSuppressed; }
@@ -30,6 +34,9 @@ private:
 	// Transient because these values travel through saved moves, not property replication.
 	UPROPERTY(Transient)
 	bool bAbilityRootMotionSuppressed = false;
+
+	UPROPERTY(Transient)
+	bool bHitStopRootMotionSuppressed = false;
 
 	UPROPERTY(Transient)
 	bool bAbilityMovementInputSuppressed = false;

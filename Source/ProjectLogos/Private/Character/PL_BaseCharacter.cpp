@@ -42,6 +42,7 @@ APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer
 	bUseControllerRotationYaw = false;
 
 	AbilityAnimState = FRepAbilityAnimState();
+	HitStopState = FRepHitStopState();
 }
 
 void APL_BaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -59,6 +60,7 @@ void APL_BaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(APL_BaseCharacter, AbilityAnimState);
+	DOREPLIFETIME(APL_BaseCharacter, HitStopState);
 }
 
 UAbilitySystemComponent* APL_BaseCharacter::GetAbilitySystemComponent() const
@@ -123,6 +125,36 @@ void APL_BaseCharacter::ResetAbilityAnimState()
 	SetAbilityAnimState(DefaultState);
 }
 
+void APL_BaseCharacter::SetHitStopState(const FRepHitStopState& NewState)
+{
+	if (HitStopState == NewState) return;
+
+	HitStopState = NewState;
+	ApplyHitStopState(NewState);
+
+	UWorld* World = GetWorld();
+	if (!HasAuthority() && World && !World->bIsTearingDown)
+	{
+		ServerSetHitStopState(NewState);
+	}
+}
+
+void APL_BaseCharacter::ServerSetHitStopState_Implementation(const FRepHitStopState& NewState)
+{
+	if (HitStopState == NewState) return;
+
+	HitStopState = NewState;
+	ApplyHitStopState(NewState);
+}
+
+void APL_BaseCharacter::ClearHitStopState()
+{
+	FRepHitStopState DefaultState;
+	DefaultState.bActive = false;
+	DefaultState.TimeScale = 0.f;
+	SetHitStopState(DefaultState);
+}
+
 void APL_BaseCharacter::InitializeDefaultAttributes()
 {
 	// Apply stuff later
@@ -141,6 +173,11 @@ void APL_BaseCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, ui
 void APL_BaseCharacter::OnRep_AbilityAnimState()
 {
 	ApplyAbilityAnimState(AbilityAnimState);
+}
+
+void APL_BaseCharacter::OnRep_HitStopState()
+{
+	ApplyHitStopState(HitStopState);
 }
 
 void APL_BaseCharacter::ApplyAbilityAnimState(const FRepAbilityAnimState& NewState)
@@ -171,4 +208,18 @@ void APL_BaseCharacter::ApplyAbilityAnimState(const FRepAbilityAnimState& NewSta
 		NewState.bRootMotionEnabled
 			? ERootMotionMode::RootMotionFromMontagesOnly
 			: ERootMotionMode::IgnoreRootMotion);
+}
+
+void APL_BaseCharacter::ApplyHitStopState(const FRepHitStopState& NewState)
+{
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp) return;
+
+	const float ClampedTimeScale = FMath::Clamp(NewState.TimeScale, 0.f, 1.f);
+	MeshComp->GlobalAnimRateScale = NewState.bActive ? ClampedTimeScale : 1.f;
+
+	if (UPL_CharacterMovementComponent* MoveComp = Cast<UPL_CharacterMovementComponent>(GetCharacterMovement()))
+	{
+		MoveComp->SetHitStopRootMotionSuppressed(NewState.bActive);
+	}
 }

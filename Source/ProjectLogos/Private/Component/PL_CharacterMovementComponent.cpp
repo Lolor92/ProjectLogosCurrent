@@ -9,6 +9,7 @@ namespace PLAbilityRootMotionFlags
 	// Custom compressed flags ride along with client saved moves.
 	constexpr uint8 SuppressAbilityRootMotion = FSavedMove_Character::FLAG_Custom_0;
 	constexpr uint8 SuppressAbilityMovementInput = FSavedMove_Character::FLAG_Custom_1;
+	constexpr uint8 SuppressHitStopRootMotion = FSavedMove_Character::FLAG_Custom_2;
 }
 
 // Saved moves preserve ability-driven movement state for client prediction and replay.
@@ -24,6 +25,7 @@ public:
 		// Saved moves are pooled, so reset any state captured from the previous use.
 		bSavedAbilityRootMotionSuppressed = false;
 		bSavedAbilityMovementInputSuppressed = false;
+		bSavedHitStopRootMotionSuppressed = false;
 	}
 
 	virtual uint8 GetCompressedFlags() const override
@@ -32,8 +34,8 @@ public:
 
 		// Pack our transient ability state into the bits sent with the movement update.
 		if (bSavedAbilityRootMotionSuppressed) Result |= PLAbilityRootMotionFlags::SuppressAbilityRootMotion;
-
 		if (bSavedAbilityMovementInputSuppressed) Result |= PLAbilityRootMotionFlags::SuppressAbilityMovementInput;
+		if (bSavedHitStopRootMotionSuppressed) Result |= PLAbilityRootMotionFlags::SuppressHitStopRootMotion;
 
 		return Result;
 	}
@@ -44,8 +46,8 @@ public:
 
 		// Do not merge moves across ability state changes or the flag transition can be lost.
 		if (bSavedAbilityRootMotionSuppressed != NewPLMove->bSavedAbilityRootMotionSuppressed) return false;
-
 		if (bSavedAbilityMovementInputSuppressed != NewPLMove->bSavedAbilityMovementInputSuppressed) return false;
+		if (bSavedHitStopRootMotionSuppressed != NewPLMove->bSavedHitStopRootMotionSuppressed) return false;
 
 		return Super::CanCombineWith(NewMove, Character, MaxDelta);
 	}
@@ -60,6 +62,7 @@ public:
 		{
 			bSavedAbilityRootMotionSuppressed = MoveComp->IsAbilityRootMotionSuppressed();
 			bSavedAbilityMovementInputSuppressed = MoveComp->IsAbilityMovementInputSuppressed();
+			bSavedHitStopRootMotionSuppressed = MoveComp->IsHitStopRootMotionSuppressed();
 		}
 	}
 
@@ -72,12 +75,14 @@ public:
 		{
 			MoveComp->SetAbilityRootMotionSuppressed(bSavedAbilityRootMotionSuppressed);
 			MoveComp->SetAbilityMovementInputSuppressed(bSavedAbilityMovementInputSuppressed);
+			MoveComp->SetHitStopRootMotionSuppressed(bSavedHitStopRootMotionSuppressed);
 		}
 	}
 
 private:
 	uint8 bSavedAbilityRootMotionSuppressed : 1 = false;
 	uint8 bSavedAbilityMovementInputSuppressed : 1 = false;
+	uint8 bSavedHitStopRootMotionSuppressed : 1 = false;
 };
 
 // Client prediction data is only customized so it can allocate our saved move type.
@@ -104,6 +109,14 @@ void UPL_CharacterMovementComponent::SetAbilityRootMotionSuppressed(bool bInSupp
 	RefreshAbilityRootMotionMode();
 }
 
+void UPL_CharacterMovementComponent::SetHitStopRootMotionSuppressed(bool bInSuppressed)
+{
+	if (bHitStopRootMotionSuppressed == bInSuppressed) return;
+
+	bHitStopRootMotionSuppressed = bInSuppressed;
+	RefreshAbilityRootMotionMode();
+}
+
 void UPL_CharacterMovementComponent::SetAbilityMovementInputSuppressed(bool bInSuppressed)
 {
 	// Input suppression is separate so collision can stop root motion without unlocking movement.
@@ -121,7 +134,9 @@ void UPL_CharacterMovementComponent::RefreshAbilityRootMotionMode()
 	if (!AnimInstance) return;
 
 	// Keep the anim instance in the same root-motion mode as the predicted CMC flag.
-	const bool bRootMotionEnabled = !bAbilityRootMotionSuppressed;
+	const bool bRootMotionEnabled =
+		!bAbilityRootMotionSuppressed &&
+		!bHitStopRootMotionSuppressed;
 	AnimInstance->bRootMotionEnabled = bRootMotionEnabled;
 	AnimInstance->SetRootMotionMode(
 		bRootMotionEnabled
@@ -136,6 +151,7 @@ void UPL_CharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 	// Movement prediction decodes these bits from the compressed move.
 	bAbilityRootMotionSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressAbilityRootMotion) != 0;
 	bAbilityMovementInputSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressAbilityMovementInput) != 0;
+	bHitStopRootMotionSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressHitStopRootMotion) != 0;
 	RefreshAbilityRootMotionMode();
 }
 
