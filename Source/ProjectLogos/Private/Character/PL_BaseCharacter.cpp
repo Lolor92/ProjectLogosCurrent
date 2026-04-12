@@ -10,6 +10,15 @@
 #include "Net/UnrealNetwork.h"
 #include "Player/PL_PlayerState.h"
 
+namespace
+{
+	bool AreHitStopStatesEqual(const FRepHitStopState& Left, const FRepHitStopState& Right)
+	{
+		return Left.bActive == Right.bActive
+			&& FMath::IsNearlyEqual(Left.TimeScale, Right.TimeScale);
+	}
+}
+
 APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPL_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
@@ -127,7 +136,7 @@ void APL_BaseCharacter::ResetAbilityAnimState()
 
 void APL_BaseCharacter::SetHitStopState(const FRepHitStopState& NewState)
 {
-	if (HitStopState == NewState) return;
+	if (AreHitStopStatesEqual(HitStopState, NewState)) return;
 
 	HitStopState = NewState;
 	ApplyHitStopState(NewState);
@@ -141,7 +150,7 @@ void APL_BaseCharacter::SetHitStopState(const FRepHitStopState& NewState)
 
 void APL_BaseCharacter::ServerSetHitStopState_Implementation(const FRepHitStopState& NewState)
 {
-	if (HitStopState == NewState) return;
+	if (AreHitStopStatesEqual(HitStopState, NewState)) return;
 
 	HitStopState = NewState;
 	ApplyHitStopState(NewState);

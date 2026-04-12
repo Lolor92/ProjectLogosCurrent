@@ -56,28 +56,11 @@ struct FRepHitStopState
 {
 	GENERATED_BODY()
 
-	UPROPERTY()
-	uint8 bActive : 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bActive = false;
 
-	UPROPERTY()
-	float TimeScale;
-
-	FRepHitStopState()
-		: bActive(false)
-		, TimeScale(0.f)
-	{
-	}
-
-	bool operator==(const FRepHitStopState& Other) const
-	{
-		return bActive == Other.bActive
-			&& FMath::IsNearlyEqual(TimeScale, Other.TimeScale);
-	}
-
-	bool operator!=(const FRepHitStopState& Other) const
-	{
-		return !(*this == Other);
-	}
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float TimeScale = 0.f;
 };
 
 UCLASS()
