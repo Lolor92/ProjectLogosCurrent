@@ -28,6 +28,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection", meta=(ShowOnlyInnerProperties))
 	FPLHitWindowShapeSettings HitShapeSettings;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitStopSettings HitStopSettings;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
 		meta=(TitleProperty="GameplayEffectClass"))
 	TArray<FPLHitWindowGameplayEffect> GameplayEffectsToApply;
