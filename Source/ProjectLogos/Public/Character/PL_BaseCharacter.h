@@ -8,6 +8,7 @@
 class UPL_CombatComponent;
 class UAbilitySystemComponent;
 class UAttributeSet;
+class UAnimMontage;
 
 // Replicated ability animation state shared by montage abilities and animation code.
 USTRUCT(BlueprintType)
@@ -133,4 +134,7 @@ protected:
 	// Combat setup and reactions.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat")
 	TObjectPtr<UPL_CombatComponent> CombatComponent = nullptr;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> HitStopPausedMontage = nullptr;
 };

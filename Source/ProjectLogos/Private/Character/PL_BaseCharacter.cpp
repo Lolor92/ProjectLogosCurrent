@@ -9,6 +9,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/PL_PlayerState.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 
 namespace
 {
@@ -224,11 +226,35 @@ void APL_BaseCharacter::ApplyHitStopState(const FRepHitStopState& NewState)
 	USkeletalMeshComponent* MeshComp = GetMesh();
 	if (!MeshComp) return;
 
-	const float ClampedTimeScale = FMath::Clamp(NewState.TimeScale, 0.f, 1.f);
-	MeshComp->GlobalAnimRateScale = NewState.bActive ? ClampedTimeScale : 1.f;
+	UAnimInstance* AnimInstance = MeshComp->GetAnimInstance();
+	if (!AnimInstance) return;
 
 	if (UPL_CharacterMovementComponent* MoveComp = Cast<UPL_CharacterMovementComponent>(GetCharacterMovement()))
 	{
 		MoveComp->SetHitStopRootMotionSuppressed(NewState.bActive);
+	}
+
+	if (NewState.bActive)
+	{
+		if (!HitStopPausedMontage)
+		{
+			if (UAnimMontage* ActiveMontage = AnimInstance->GetCurrentActiveMontage())
+			{
+				HitStopPausedMontage = ActiveMontage;
+				AnimInstance->Montage_Pause(HitStopPausedMontage);
+			}
+		}
+
+		return;
+	}
+
+	if (HitStopPausedMontage)
+	{
+		if (AnimInstance->Montage_IsActive(HitStopPausedMontage))
+		{
+			AnimInstance->Montage_Resume(HitStopPausedMontage);
+		}
+
+		HitStopPausedMontage = nullptr;
 	}
 }
