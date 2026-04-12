@@ -46,43 +46,54 @@ public:
 	void InitializeCombat(APL_BaseCharacter* InCharacter, UAbilitySystemComponent* InAbilitySystemComponent);
 	void DeinitializeCombat();
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
-	
-	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
-		FName DebugSocketName, const FPLHitWindowShapeSettings& HitShapeSettings,
+
+	bool BeginHitDetectionWindow(
+		const UAnimNotifyState* NotifyState,
+		USkeletalMeshComponent* MeshComp,
+		FName DebugSocketName,
+		const FPLHitWindowShapeSettings& HitShapeSettings,
 		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
-	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
+
+	void EndHitDetectionWindow(
+		const UAnimNotifyState* NotifyState,
+		USkeletalMeshComponent* MeshComp);
 
 protected:
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
+	virtual void TickComponent(
+		float DeltaTime,
+		ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
-	
-	// Default abilities.
+
+	// Default abilities granted on authority.
 	UPROPERTY(EditDefaultsOnly, Category="Ability")
 	TArray<TObjectPtr<UPL_AbilitySet>> DefaultAbilitySets;
 
-	// Gameplay tag reactions.
+	// Gameplay tag driven reactions.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Tag Reactions")
 	TObjectPtr<UPL_TagReactionData> TagReactionData = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Tag Reactions", meta=(TitleProperty="AnimBoolName"))
 	TArray<FPL_AnimBoolBinding> AnimBoolBindings;
 
-	// Crowd control.
+	// Input lock tag.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Crowd Control")
 	FGameplayTag CrowdControlTag;
 
-	// Airborne gameplay effect.
+	// Applied while falling.
 	UPROPERTY(EditDefaultsOnly, Category="Effects")
 	TSubclassOf<UGameplayEffect> AirborneEffectClass;
 
 private:
+	// Ability setup.
 	void GrantDefaultAbilities();
 	void ClearDefaultAbilities();
 
+	// Crowd control.
 	void BindCrowdControlTagEvent();
 	void ClearCrowdControlTagEvent();
 	void OnCrowdControlTagChanged(const FGameplayTag Tag, int32 NewCount);
 
+	// Tag reactions.
 	void BindTagReactionEvents();
 	void ClearTagReactionEvents();
 	void OnReactionTagChanged(const FGameplayTag Tag, int32 NewCount);
@@ -95,10 +106,14 @@ private:
 	FName GetRemoveTimerKey(const FPL_TagReactionBinding& Binding, const FGameplayTag& TriggeredTag) const;
 	void ExecuteDelayed(TFunction<void()> Function, float DelaySeconds, FTimerHandle& TimerHandle);
 
-	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
+	// Gameplay effects.
+	FActiveGameplayEffectHandle ApplyEffectToSelf(
+		const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
 		float Level) const;
+
 	void RemoveGameplayEffect(FActiveGameplayEffectHandle& EffectHandle);
 
+	// Cached owner references.
 	UPROPERTY()
 	TObjectPtr<APL_BaseCharacter> OwningCharacter = nullptr;
 
@@ -108,26 +123,40 @@ private:
 	UPROPERTY()
 	TObjectPtr<UAnimInstance> AnimInstance = nullptr;
 
+	// Granted default abilities.
 	FPLAbilitySetGrantedHandles DefaultAbilityHandles;
+
+	// Crowd control binding state.
 	FGameplayTag BoundCrowdControlTag;
 	FDelegateHandle CrowdControlTagDelegateHandle;
+
+	// Tag reaction timers and delegates.
 	TMap<FGameplayTag, FDelegateHandle> TagReactionDelegateHandles;
 	TMap<FGameplayTag, FTimerHandle> AbilityReactionTimers;
 	TMap<FGameplayTag, FTimerHandle> ApplyEffectReactionTimers;
 	TMap<FName, FTimerHandle> RemoveEffectReactionTimers;
-	FActiveGameplayEffectHandle AirborneEffectHandle;
 
+	// Airborne effect state.
+	FActiveGameplayEffectHandle AirborneEffectHandle;
 	bool bAirborneEffectApplied = false;
-	
+
+	// Active notify windows.
 	TMap<FObjectKey, FName> ActiveHitDetectionWindows;
-	
+	TMap<FObjectKey, int32> ActiveHitDetectionWindowCounts;
+
+	// Hit detection.
 	void RunHitDebugQuery(const FTransform& StartTransform, const FTransform& EndTransform, bool bDrawDebug);
 	void DebugSweepActiveHitWindow();
 	void ResetActiveHitDebugWindow();
-	FTransform GetHitTraceWorldTransform(USkeletalMeshComponent* MeshComp, FName SocketName,
+
+	FTransform GetHitTraceWorldTransform(
+		USkeletalMeshComponent* MeshComp,
+		FName SocketName,
 		const FPLHitWindowShapeSettings& HitShapeSettings) const;
+
 	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
 
+	// Active hit window state.
 	UPROPERTY(Transient)
 	TObjectPtr<USkeletalMeshComponent> ActiveHitDebugMesh = nullptr;
 
@@ -136,9 +165,8 @@ private:
 	bool bHitDebugWindowActive = false;
 	bool bHasPreviousHitDebugLocation = false;
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisWindow;
-	
-	TMap<FObjectKey, int32> ActiveHitDetectionWindowCounts;
 	int32 ActiveHitDebugWindowDepth = 0;
+
 	FPLHitWindowShapeSettings ActiveHitShapeSettings;
 	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
 };
