@@ -36,6 +36,7 @@ void UPL_HitDetectionNotifyState::NotifyBegin(USkeletalMeshComponent* MeshComp, 
 			MeshComp,
 			DebugSocketName,
 			HitShapeSettings,
+			HitStopSettings,
 			GameplayEffectsToApply);
 	}
 }

@@ -9,6 +9,7 @@ class UPL_CombatComponent;
 class UAbilitySystemComponent;
 class UAttributeSet;
 class UAnimMontage;
+struct FTimerHandle;
 
 // Replicated ability animation state shared by montage abilities and animation code.
 USTRUCT(BlueprintType)
@@ -90,6 +91,9 @@ public:
 	void SetHitStopState(const FRepHitStopState& NewState);
 
 	UFUNCTION(BlueprintCallable, Category="HitStop")
+	void StartHitStop(float Duration, float TimeScale = 0.f);
+
+	UFUNCTION(BlueprintCallable, Category="HitStop")
 	void ClearHitStopState();
 
 	const FRepAbilityAnimState& GetAbilityAnimState() const { return AbilityAnimState; }
@@ -137,4 +141,6 @@ protected:
 	
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> HitStopPausedMontage = nullptr;
+
+	FTimerHandle HitStopTimerHandle;
 };

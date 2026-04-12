@@ -631,7 +631,9 @@ void UPL_CombatComponent::ResetActiveHitDebugWindow()
 	HitActorsThisWindow.Reset();
 	ActiveHitDebugWindowDepth = 0;
 	ActiveHitShapeSettings = FPLHitWindowShapeSettings();
+	ActiveHitStopSettings = FPLHitStopSettings();
 	ActiveGameplayEffectsToApply.Reset();
+	bHasTriggeredHitStopThisWindow = false;
 
 	SetComponentTickEnabled(false);
 }
@@ -656,30 +658,39 @@ FTransform UPL_CombatComponent::GetHitTraceWorldTransform(
 
 void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult)
 {
-	if (!AbilitySystemComponent || !HitActor || HitActor == GetOwner() || ActiveGameplayEffectsToApply.IsEmpty())
+	if (!AbilitySystemComponent || !HitActor || HitActor == GetOwner())
 	{
 		return;
 	}
 
-	UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor);
-	if (!TargetASC) return;
-
-	FGameplayEffectContextHandle ContextHandle = AbilitySystemComponent->MakeEffectContext();
-	ContextHandle.AddSourceObject(this);
-	ContextHandle.AddHitResult(HitResult);
-
-	for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveGameplayEffectsToApply)
+	if (!ActiveGameplayEffectsToApply.IsEmpty())
 	{
-		if (!GameplayEffectToApply.GameplayEffectClass) continue;
+		if (UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor))
+		{
+			FGameplayEffectContextHandle ContextHandle = AbilitySystemComponent->MakeEffectContext();
+			ContextHandle.AddSourceObject(this);
+			ContextHandle.AddHitResult(HitResult);
 
-		const FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(
-			GameplayEffectToApply.GameplayEffectClass,
-			GameplayEffectToApply.EffectLevel,
-			ContextHandle);
+			for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveGameplayEffectsToApply)
+			{
+				if (!GameplayEffectToApply.GameplayEffectClass) continue;
 
-		if (!SpecHandle.IsValid()) continue;
+				const FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(
+					GameplayEffectToApply.GameplayEffectClass,
+					GameplayEffectToApply.EffectLevel,
+					ContextHandle);
 
-		AbilitySystemComponent->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+				if (!SpecHandle.IsValid()) continue;
+
+				AbilitySystemComponent->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+			}
+		}
+	}
+
+	if (!bHasTriggeredHitStopThisWindow && ActiveHitStopSettings.IsEnabled() && OwningCharacter)
+	{
+		OwningCharacter->StartHitStop(ActiveHitStopSettings.Duration, ActiveHitStopSettings.TimeScale);
+		bHasTriggeredHitStopThisWindow = true;
 	}
 }
 
@@ -688,6 +699,7 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(
 	USkeletalMeshComponent* MeshComp,
 	FName DebugSocketName,
 	const FPLHitWindowShapeSettings& HitShapeSettings,
+	const FPLHitStopSettings& HitStopSettings,
 	const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply)
 {
 	if (!NotifyState || !MeshComp) return false;
@@ -717,8 +729,10 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(
 	ActiveHitDebugMesh = MeshComp;
 	ActiveHitDebugSocketName = DebugSocketName;
 	ActiveHitShapeSettings = HitShapeSettings;
+	ActiveHitStopSettings = HitStopSettings;
 	ActiveGameplayEffectsToApply = GameplayEffectsToApply;
 	HitActorsThisWindow.Reset();
+	bHasTriggeredHitStopThisWindow = false;
 
 	// Run an initial overlap immediately in case the attack starts inside a target.
 	const FTransform InitialTransform = GetHitTraceWorldTransform(

@@ -11,6 +11,7 @@
 #include "Player/PL_PlayerState.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -158,8 +159,36 @@ void APL_BaseCharacter::ServerSetHitStopState_Implementation(const FRepHitStopSt
 	ApplyHitStopState(NewState);
 }
 
+void APL_BaseCharacter::StartHitStop(float Duration, float TimeScale)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	Duration = FMath::Max(0.f, Duration);
+	if (Duration <= 0.f) return;
+
+	FRepHitStopState NewState;
+	NewState.bActive = true;
+	NewState.TimeScale = FMath::Clamp(TimeScale, 0.f, 1.f);
+
+	SetHitStopState(NewState);
+
+	World->GetTimerManager().ClearTimer(HitStopTimerHandle);
+	World->GetTimerManager().SetTimer(
+		HitStopTimerHandle,
+		this,
+		&ThisClass::ClearHitStopState,
+		Duration,
+		false);
+}
+
 void APL_BaseCharacter::ClearHitStopState()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitStopTimerHandle);
+	}
+
 	FRepHitStopState DefaultState;
 	DefaultState.bActive = false;
 	DefaultState.TimeScale = 0.f;

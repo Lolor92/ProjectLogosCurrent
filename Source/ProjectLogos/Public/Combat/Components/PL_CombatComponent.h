@@ -52,6 +52,7 @@ public:
 		USkeletalMeshComponent* MeshComp,
 		FName DebugSocketName,
 		const FPLHitWindowShapeSettings& HitShapeSettings,
+		const FPLHitStopSettings& HitStopSettings,
 		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
 
 	void EndHitDetectionWindow(
@@ -168,5 +169,7 @@ private:
 	int32 ActiveHitDebugWindowDepth = 0;
 
 	FPLHitWindowShapeSettings ActiveHitShapeSettings;
+	FPLHitStopSettings ActiveHitStopSettings;
 	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
+	bool bHasTriggeredHitStopThisWindow = false;
 };
