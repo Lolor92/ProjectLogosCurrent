@@ -7,20 +7,13 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameplayEffect.h"
+#include "GameplayEffectTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/PL_PlayerState.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "TimerManager.h"
-
-namespace
-{
-	bool AreHitStopStatesEqual(const FRepHitStopState& Left, const FRepHitStopState& Right)
-	{
-		return Left.bActive == Right.bActive
-			&& FMath::IsNearlyEqual(Left.TimeScale, Right.TimeScale);
-	}
-}
 
 APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPL_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -46,15 +39,21 @@ APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer
 	GetCharacterMovement()->MaxCustomMovementSpeed = 400.0f;
 
 	GetCharacterMovement()->MaxJumpApexAttemptsPerSimulation = 1;
-	GetCharacterMovement()->JumpZVelocity = 950.f;
+	GetCharacterMovement()->JumpZVelocity = 850.f;
 	GetCharacterMovement()->AirControl = 0.5f;
-	GetCharacterMovement()->GravityScale = 3.f;
+	GetCharacterMovement()->GravityScale = 2.5f;
 
 	// Ability montages manage rotation when needed.
 	bUseControllerRotationYaw = false;
 
 	AbilityAnimState = FRepAbilityAnimState();
-	HitStopState = FRepHitStopState();
+}
+
+void APL_BaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(APL_BaseCharacter, AbilityAnimState);
 }
 
 void APL_BaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -65,14 +64,6 @@ void APL_BaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	Super::EndPlay(EndPlayReason);
-}
-
-void APL_BaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	DOREPLIFETIME(APL_BaseCharacter, AbilityAnimState);
-	DOREPLIFETIME(APL_BaseCharacter, HitStopState);
 }
 
 UAbilitySystemComponent* APL_BaseCharacter::GetAbilitySystemComponent() const
@@ -137,67 +128,118 @@ void APL_BaseCharacter::ResetAbilityAnimState()
 	SetAbilityAnimState(DefaultState);
 }
 
-void APL_BaseCharacter::SetHitStopState(const FRepHitStopState& NewState)
-{
-	if (AreHitStopStatesEqual(HitStopState, NewState)) return;
-
-	HitStopState = NewState;
-	ApplyHitStopState(NewState);
-
-	UWorld* World = GetWorld();
-	if (!HasAuthority() && World && !World->bIsTearingDown)
-	{
-		ServerSetHitStopState(NewState);
-	}
-}
-
-void APL_BaseCharacter::ServerSetHitStopState_Implementation(const FRepHitStopState& NewState)
-{
-	if (AreHitStopStatesEqual(HitStopState, NewState)) return;
-
-	HitStopState = NewState;
-	ApplyHitStopState(NewState);
-}
-
-void APL_BaseCharacter::StartHitStop(float Duration, float TimeScale)
+void APL_BaseCharacter::ApplyHitStop(float Duration, float TimeScale)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
 
 	Duration = FMath::Max(0.f, Duration);
 	if (Duration <= 0.f) return;
+	
+	UCharacterMovementComponent* MovementComp = nullptr;
+	AController* OwnerController = nullptr;
+	EMovementMode PreviousMovementMode = MOVE_None;
+	uint8 PreviousCustomMovementMode = 0;
+	bool bChangedControllerMoveInput = false;
+	
+	if (ACharacter* CharacterOwner = Cast<ACharacter>(GetOwner()))
+	{
+		MovementComp = CharacterOwner->GetCharacterMovement();
+		if (MovementComp)
+		{
+			PreviousMovementMode = MovementComp->MovementMode;
+			PreviousCustomMovementMode = MovementComp->CustomMovementMode;
 
-	FRepHitStopState NewState;
-	NewState.bActive = true;
-	NewState.TimeScale = FMath::Clamp(TimeScale, 0.f, 1.f);
+			// Stop and hard-lock movement during hit-stop.
+			MovementComp->StopMovementImmediately();
+			MovementComp->DisableMovement();
+		}
 
-	SetHitStopState(NewState);
+		OwnerController = CharacterOwner->GetController();
+		if (OwnerController && !OwnerController->IsMoveInputIgnored())
+		{
+			OwnerController->SetIgnoreMoveInput(true);
+			bChangedControllerMoveInput = true;
+		}
+	}
 
-	World->GetTimerManager().ClearTimer(HitStopTimerHandle);
+	USkeletalMeshComponent* HitStopMesh = GetMesh();
+	if (!HitStopMesh) return;
+
+	bHasHitStopped = true;
+
+	const float PreviousAnimRate = HitStopMesh->GlobalAnimRateScale;
+	const float NewAnimRate = FMath::Max(0.f, TimeScale);
+	HitStopMesh->GlobalAnimRateScale = NewAnimRate;
+	
+	if (!World)
+	{
+		HitStopMesh->GlobalAnimRateScale = PreviousAnimRate;
+		bHasHitStopped = false;
+		return;
+	}
+
+	FTimerHandle TimerHandle;
 	World->GetTimerManager().SetTimer(
-		HitStopTimerHandle,
-		this,
-		&ThisClass::ClearHitStopState,
+		TimerHandle,
+		FTimerDelegate::CreateWeakLambda(this, [this, HitStopMesh, PreviousAnimRate, MovementComp, PreviousMovementMode, PreviousCustomMovementMode, OwnerController, bChangedControllerMoveInput]()
+		{
+			if (IsValid(HitStopMesh))
+			{
+				HitStopMesh->GlobalAnimRateScale = PreviousAnimRate;
+			}
+
+			// Restore movement mode so root motion can continue as normal.
+			if (IsValid(MovementComp))
+			{
+				if (PreviousMovementMode == MOVE_Custom)
+				{
+					MovementComp->SetMovementMode(MOVE_Custom, PreviousCustomMovementMode);
+				}
+				else
+				{
+					MovementComp->SetMovementMode(PreviousMovementMode);
+				}
+			}
+
+			if (IsValid(OwnerController) && bChangedControllerMoveInput)
+			{
+				OwnerController->SetIgnoreMoveInput(false);
+			}
+
+			bHasHitStopped = false;
+		}),
 		Duration,
 		false);
 }
 
-void APL_BaseCharacter::ClearHitStopState()
-{
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(HitStopTimerHandle);
-	}
-
-	FRepHitStopState DefaultState;
-	DefaultState.bActive = false;
-	DefaultState.TimeScale = 0.f;
-	SetHitStopState(DefaultState);
-}
-
 void APL_BaseCharacter::InitializeDefaultAttributes()
 {
-	// Apply stuff later
+	for (const TSubclassOf<UGameplayEffect>& EffectClass : DefaultAttributeEffects)
+	{
+		ApplyEffectToSelf(EffectClass, 1.f);
+	}
+}
+
+FActiveGameplayEffectHandle APL_BaseCharacter::ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
+	float Level) const
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!ASC || !GameplayEffectClass)
+	{
+		return FActiveGameplayEffectHandle();
+	}
+
+	FGameplayEffectContextHandle ContextHandle = ASC->MakeEffectContext();
+	ContextHandle.AddSourceObject(this);
+
+	const FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(GameplayEffectClass, Level, ContextHandle);
+	if (!SpecHandle.IsValid())
+	{
+		return FActiveGameplayEffectHandle();
+	}
+
+	return ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
 }
 
 void APL_BaseCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -213,11 +255,6 @@ void APL_BaseCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, ui
 void APL_BaseCharacter::OnRep_AbilityAnimState()
 {
 	ApplyAbilityAnimState(AbilityAnimState);
-}
-
-void APL_BaseCharacter::OnRep_HitStopState()
-{
-	ApplyHitStopState(HitStopState);
 }
 
 void APL_BaseCharacter::ApplyAbilityAnimState(const FRepAbilityAnimState& NewState)
@@ -248,42 +285,4 @@ void APL_BaseCharacter::ApplyAbilityAnimState(const FRepAbilityAnimState& NewSta
 		NewState.bRootMotionEnabled
 			? ERootMotionMode::RootMotionFromMontagesOnly
 			: ERootMotionMode::IgnoreRootMotion);
-}
-
-void APL_BaseCharacter::ApplyHitStopState(const FRepHitStopState& NewState)
-{
-	USkeletalMeshComponent* MeshComp = GetMesh();
-	if (!MeshComp) return;
-
-	UAnimInstance* AnimInstance = MeshComp->GetAnimInstance();
-	if (!AnimInstance) return;
-
-	if (UPL_CharacterMovementComponent* MoveComp = Cast<UPL_CharacterMovementComponent>(GetCharacterMovement()))
-	{
-		MoveComp->SetHitStopRootMotionSuppressed(NewState.bActive);
-	}
-
-	if (NewState.bActive)
-	{
-		if (!HitStopPausedMontage)
-		{
-			if (UAnimMontage* ActiveMontage = AnimInstance->GetCurrentActiveMontage())
-			{
-				HitStopPausedMontage = ActiveMontage;
-				AnimInstance->Montage_Pause(HitStopPausedMontage);
-			}
-		}
-
-		return;
-	}
-
-	if (HitStopPausedMontage)
-	{
-		if (AnimInstance->Montage_IsActive(HitStopPausedMontage))
-		{
-			AnimInstance->Montage_Resume(HitStopPausedMontage);
-		}
-
-		HitStopPausedMontage = nullptr;
-	}
 }

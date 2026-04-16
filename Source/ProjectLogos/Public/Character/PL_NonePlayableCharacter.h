@@ -14,9 +14,8 @@ class PROJECTLOGOS_API APL_NonePlayableCharacter : public APL_BaseCharacter
 public:
 	APL_NonePlayableCharacter();
 	
-protected:
-	// NPC-owned ASC setup.
 	virtual void BeginPlay() override;
 	
+protected:
 	virtual void InitAbilityActorInfo();
 };

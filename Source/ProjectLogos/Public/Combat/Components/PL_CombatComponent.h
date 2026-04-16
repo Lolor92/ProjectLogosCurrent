@@ -42,10 +42,14 @@ class PROJECTLOGOS_API UPL_CombatComponent : public UActorComponent
 
 public:
 	UPL_CombatComponent();
+	
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void InitializeCombat(APL_BaseCharacter* InCharacter, UAbilitySystemComponent* InAbilitySystemComponent);
 	void DeinitializeCombat();
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
+	bool IsBlockingActive() const;
+	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 
 	bool BeginHitDetectionWindow(
 		const UAnimNotifyState* NotifyState,
@@ -53,18 +57,17 @@ public:
 		FName DebugSocketName,
 		const FPLHitWindowShapeSettings& HitShapeSettings,
 		const FPLHitStopSettings& HitStopSettings,
-		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply);
+		const FPLHitWindowMovementSettings& MovementSettings,
+		const FPLHitWindowRotationSettings& RotationSettings,
+		const FPLHitWindowBlockSettings& BlockSettings,
+		const FPLHitWindowDodgeSettings& DodgeSettings,
+		EPLHitWindowSuperArmorLevel RequiredSuperArmor,
+		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply,
+		const TArray<FPLHitWindowGameplayCue>& GameplayCuesToExecute);
 
-	void EndHitDetectionWindow(
-		const UAnimNotifyState* NotifyState,
-		USkeletalMeshComponent* MeshComp);
+	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
 
 protected:
-	virtual void TickComponent(
-		float DeltaTime,
-		ELevelTick TickType,
-		FActorComponentTickFunction* ThisTickFunction) override;
-
 	// Default abilities granted on authority.
 	UPROPERTY(EditDefaultsOnly, Category="Ability")
 	TArray<TObjectPtr<UPL_AbilitySet>> DefaultAbilitySets;
@@ -83,6 +86,48 @@ protected:
 	// Applied while falling.
 	UPROPERTY(EditDefaultsOnly, Category="Effects")
 	TSubclassOf<UGameplayEffect> AirborneEffectClass;
+
+	// Tag required on a defender for hits to be considered blockable.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Block")
+	FGameplayTag BlockingTag;
+
+	// Tag required on a defender for hits to be considered dodgeable.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Dodge")
+	FGameplayTag DodgingTag;
+
+	// Tags that mark the owner as having super armor at each level.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Super Armor")
+	FGameplayTag SuperArmorTag1;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Super Armor")
+	FGameplayTag SuperArmorTag2;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Super Armor")
+	FGameplayTag SuperArmorTag3;
+
+	// Applied when this component's owner lands a hit that gets blocked.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Block")
+	TSubclassOf<UGameplayEffect> AttackerBlockedEffectClass;
+
+	// Applied when this component's owner successfully blocks an incoming hit.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Block")
+	TSubclassOf<UGameplayEffect> DefenderBlockedEffectClass;
+
+	// Applied when this component's owner lands a hit that gets dodged.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Dodge")
+	TSubclassOf<UGameplayEffect> AttackerDodgedEffectClass;
+
+	// Applied when this component's owner successfully dodges an incoming hit.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Dodge")
+	TSubclassOf<UGameplayEffect> DefenderDodgedEffectClass;
+
+	// Applied when this component's owner lands a hit that is resisted by super armor.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Super Armor")
+	TSubclassOf<UGameplayEffect> AttackerSuperArmoredEffectClass;
+
+	// Applied when this component's owner successfully resists a hit via super armor.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Super Armor")
+	TSubclassOf<UGameplayEffect> DefenderSuperArmoredEffectClass;
 
 private:
 	// Ability setup.
@@ -108,9 +153,7 @@ private:
 	void ExecuteDelayed(TFunction<void()> Function, float DelaySeconds, FTimerHandle& TimerHandle);
 
 	// Gameplay effects.
-	FActiveGameplayEffectHandle ApplyEffectToSelf(
-		const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
-		float Level) const;
+	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass, float Level) const;
 
 	void RemoveGameplayEffect(FActiveGameplayEffectHandle& EffectHandle);
 
@@ -150,12 +193,30 @@ private:
 	void DebugSweepActiveHitWindow();
 	void ResetActiveHitDebugWindow();
 
-	FTransform GetHitTraceWorldTransform(
-		USkeletalMeshComponent* MeshComp,
-		FName SocketName,
+	FTransform GetHitTraceWorldTransform(USkeletalMeshComponent* MeshComp, FName SocketName, 
 		const FPLHitWindowShapeSettings& HitShapeSettings) const;
 
 	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
+	void ApplyHitWindowTransformEffects(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyHitWindowMovement(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyHitWindowRotation(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ExecuteHitWindowGameplayCues(AActor* HitActor, const FHitResult* HitResult, EPLHitWindowCueTriggerTiming TriggerTiming) const;
+	void ExecuteGameplayCueOnASC(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
+		const FPLHitWindowGameplayCue& Cue, const FHitResult* HitResult) const;
+	void ExecuteLocalCameraShakeCue(const FPLHitWindowGameplayCue& Cue, const FHitResult* HitResult) const;
+	bool ShouldExecuteLocalCameraShakeCue() const;
+	FVector GetGameplayCueSpawnLocation(const FPLHitWindowGameplayCue& Cue,const FHitResult* HitResult) const;
+	USceneComponent* GetGameplayCueAttachComponent(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
+		const FPLHitWindowGameplayCue& Cue,const FHitResult* HitResult) const;
+	bool IsAttackBlocked(AActor* HitActor) const;
+	bool IsAttackDodged(AActor* HitActor) const;
+	bool HasRequiredSuperArmor(AActor* HitActor) const;
+	static bool IsWithinBlockAngle(const AActor* DefenderActor, const AActor* AttackerActor, float BlockAngleDegrees);
+	bool HasSuperArmorAtOrAbove(EPLHitWindowSuperArmorLevel RequiredSuperArmor) const;
+	void ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,
+		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyGameplayEffectToActor(AActor* RecipientActor, const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
+		float EffectLevel, const FHitResult* HitResult) const;
 
 	// Active hit window state.
 	UPROPERTY(Transient)
@@ -170,6 +231,12 @@ private:
 
 	FPLHitWindowShapeSettings ActiveHitShapeSettings;
 	FPLHitStopSettings ActiveHitStopSettings;
+	FPLHitWindowMovementSettings ActiveHitMovementSettings;
+	FPLHitWindowRotationSettings ActiveHitRotationSettings;
+	FPLHitWindowBlockSettings ActiveHitBlockSettings;
+	FPLHitWindowDodgeSettings ActiveHitDodgeSettings;
+	EPLHitWindowSuperArmorLevel ActiveHitRequiredSuperArmor = EPLHitWindowSuperArmorLevel::None;
 	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
+	TArray<FPLHitWindowGameplayCue> ActiveGameplayCuesToExecute;
 	bool bHasTriggeredHitStopThisWindow = false;
 };

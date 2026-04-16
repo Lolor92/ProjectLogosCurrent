@@ -17,15 +17,12 @@ public:
 	bool IsAbilityRootMotionSuppressed() const { return bAbilityRootMotionSuppressed; }
 	void RefreshAbilityRootMotionMode();
 
-	// Hit-stop root motion.
-	void SetHitStopRootMotionSuppressed(bool bInSuppressed);
-	bool IsHitStopRootMotionSuppressed() const { return bHitStopRootMotionSuppressed; }
-
 	// Ability movement input.
 	void SetAbilityMovementInputSuppressed(bool bInSuppressed);
 	bool IsAbilityMovementInputSuppressed() const { return bAbilityMovementInputSuppressed; }
 
 	// Prediction hooks.
+	virtual float GetMaxSpeed() const override;
 	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual FVector ScaleInputAcceleration(const FVector& InputAcceleration) const override;
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
@@ -36,8 +33,12 @@ private:
 	bool bAbilityRootMotionSuppressed = false;
 
 	UPROPERTY(Transient)
-	bool bHitStopRootMotionSuppressed = false;
-
-	UPROPERTY(Transient)
 	bool bAbilityMovementInputSuppressed = false;
+
+protected:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Movement")
+	float BackwardSpeedMultiplier = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Movement")
+	float BackwardDotThreshold = -0.5f;
 };

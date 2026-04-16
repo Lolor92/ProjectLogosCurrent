@@ -34,6 +34,21 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|Movement")
 	bool bUseControllerRotationYaw = true;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|State");
+	bool bIsBlocking = false;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|State");
+	bool bIsKnockdown = false;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|State");
+	bool bIsFlinching = false;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|State");
+	bool bIsFrozen = false;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Anim|State");
+	bool bIsStunned = false;
 
 private:
 	// Ability montage state.

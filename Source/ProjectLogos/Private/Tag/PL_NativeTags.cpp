@@ -50,14 +50,24 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_State_Reaction_SuperArmor3, "State.Reaction.SuperArmo
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger, "Trigger");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Flinch, "Trigger.Flinch");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit, "Trigger.Hit");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_Block_Success, "Trigger.Hit.Block.Success");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_Blocked, "Trigger.Hit.Blocked");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_Dodge_Success, "Trigger.Hit.Dodge.Success");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_Dodged, "Trigger.Hit.Dodged");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_SuperArmor_Success, "Trigger.Hit.SuperArmor.Success");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Hit_SuperArmored, "Trigger.Hit.SuperArmored");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Knockback, "Trigger.Knockback");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Knockdown, "Trigger.Knockdown");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Pushback, "Trigger.Pushback");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Stagger, "Trigger.Stagger");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Trigger_Stun, "Trigger.Stun");
+
+// Gameplay cues.
+UE_DEFINE_GAMEPLAY_TAG(TAG_GameplayCue_Hit_CameraShake, "GameplayCue.Hit.CameraShake");
+UE_DEFINE_GAMEPLAY_TAG(TAG_GameplayCue_Hit_CameraShake_Heavy, "GameplayCue.Hit.CameraShake.Heavy");
+UE_DEFINE_GAMEPLAY_TAG(TAG_GameplayCue_Hit_CameraShake_Medium, "GameplayCue.Hit.CameraShake.Medium");
+UE_DEFINE_GAMEPLAY_TAG(TAG_GameplayCue_Hit_CameraShake_Small, "GameplayCue.Hit.CameraShake.Small");
+UE_DEFINE_GAMEPLAY_TAG(TAG_GameplayCue_Hit_VFX_Melee, "GameplayCue.Hit.VFX.Melee");
 
 // Hit metadata.
 UE_DEFINE_GAMEPLAY_TAG(TAG_Hit_Critical, "Hit.Critical");

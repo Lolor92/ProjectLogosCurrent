@@ -5,22 +5,6 @@
 #include "Character/PL_BaseCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
 
-namespace
-{
-	UPL_CombatComponent* ResolveCombatComponent(USkeletalMeshComponent* MeshComp)
-	{
-		if (!MeshComp) return nullptr;
-
-		if (APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(MeshComp->GetOwner()))
-		{
-			return Character->GetCombatComponent();
-		}
-
-		return MeshComp->GetOwner()
-			? MeshComp->GetOwner()->FindComponentByClass<UPL_CombatComponent>()
-			: nullptr;
-	}
-}
 
 void UPL_HitDetectionNotifyState::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation,
 	float TotalDuration, const FAnimNotifyEventReference& EventReference)
@@ -31,13 +15,10 @@ void UPL_HitDetectionNotifyState::NotifyBegin(USkeletalMeshComponent* MeshComp, 
 
 	if (CombatComponent)
 	{
-		CombatComponent->BeginHitDetectionWindow(
-			this,
-			MeshComp,
-			DebugSocketName,
-			HitShapeSettings,
-			HitStopSettings,
-			GameplayEffectsToApply);
+		CombatComponent->BeginHitDetectionWindow(this, MeshComp, DebugSocketName,
+			HitShapeSettings, HitStopSettings, MovementSettings, RotationSettings, BlockSettings, DodgeSettings,
+			RequiredSuperArmor,
+			GameplayEffectsToApply, GameplayCuesToExecute);
 	}
 }
 
@@ -54,9 +35,16 @@ void UPL_HitDetectionNotifyState::NotifyEnd(USkeletalMeshComponent* MeshComp, UA
 	}
 }
 
-FString UPL_HitDetectionNotifyState::GetNotifyName_Implementation() const
+UPL_CombatComponent* UPL_HitDetectionNotifyState::ResolveCombatComponent(USkeletalMeshComponent* MeshComp)
 {
-	return DebugSocketName.IsNone()
-		? TEXT("HitWindow")
-		: FString::Printf(TEXT("HitWindow (%s)"), *DebugSocketName.ToString());
+	if (!MeshComp) return nullptr;
+
+	if (APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(MeshComp->GetOwner()))
+	{
+		return Character->GetCombatComponent();
+	}
+
+	return MeshComp->GetOwner()
+		? MeshComp->GetOwner()->FindComponentByClass<UPL_CombatComponent>()
+		: nullptr;
 }

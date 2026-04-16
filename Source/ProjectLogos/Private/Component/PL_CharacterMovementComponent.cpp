@@ -2,6 +2,8 @@
 
 #include "Component/PL_CharacterMovementComponent.h"
 #include "AnimInstance/PL_AnimInstance.h"
+#include "Character/PL_BaseCharacter.h"
+#include "Combat/Components/PL_CombatComponent.h"
 #include "GameFramework/Character.h"
 
 namespace PLAbilityRootMotionFlags
@@ -9,7 +11,6 @@ namespace PLAbilityRootMotionFlags
 	// Custom compressed flags ride along with client saved moves.
 	constexpr uint8 SuppressAbilityRootMotion = FSavedMove_Character::FLAG_Custom_0;
 	constexpr uint8 SuppressAbilityMovementInput = FSavedMove_Character::FLAG_Custom_1;
-	constexpr uint8 SuppressHitStopRootMotion = FSavedMove_Character::FLAG_Custom_2;
 }
 
 // Saved moves preserve ability-driven movement state for client prediction and replay.
@@ -25,7 +26,6 @@ public:
 		// Saved moves are pooled, so reset any state captured from the previous use.
 		bSavedAbilityRootMotionSuppressed = false;
 		bSavedAbilityMovementInputSuppressed = false;
-		bSavedHitStopRootMotionSuppressed = false;
 	}
 
 	virtual uint8 GetCompressedFlags() const override
@@ -35,7 +35,6 @@ public:
 		// Pack our transient ability state into the bits sent with the movement update.
 		if (bSavedAbilityRootMotionSuppressed) Result |= PLAbilityRootMotionFlags::SuppressAbilityRootMotion;
 		if (bSavedAbilityMovementInputSuppressed) Result |= PLAbilityRootMotionFlags::SuppressAbilityMovementInput;
-		if (bSavedHitStopRootMotionSuppressed) Result |= PLAbilityRootMotionFlags::SuppressHitStopRootMotion;
 
 		return Result;
 	}
@@ -47,7 +46,6 @@ public:
 		// Do not merge moves across ability state changes or the flag transition can be lost.
 		if (bSavedAbilityRootMotionSuppressed != NewPLMove->bSavedAbilityRootMotionSuppressed) return false;
 		if (bSavedAbilityMovementInputSuppressed != NewPLMove->bSavedAbilityMovementInputSuppressed) return false;
-		if (bSavedHitStopRootMotionSuppressed != NewPLMove->bSavedHitStopRootMotionSuppressed) return false;
 
 		return Super::CanCombineWith(NewMove, Character, MaxDelta);
 	}
@@ -62,7 +60,6 @@ public:
 		{
 			bSavedAbilityRootMotionSuppressed = MoveComp->IsAbilityRootMotionSuppressed();
 			bSavedAbilityMovementInputSuppressed = MoveComp->IsAbilityMovementInputSuppressed();
-			bSavedHitStopRootMotionSuppressed = MoveComp->IsHitStopRootMotionSuppressed();
 		}
 	}
 
@@ -75,14 +72,12 @@ public:
 		{
 			MoveComp->SetAbilityRootMotionSuppressed(bSavedAbilityRootMotionSuppressed);
 			MoveComp->SetAbilityMovementInputSuppressed(bSavedAbilityMovementInputSuppressed);
-			MoveComp->SetHitStopRootMotionSuppressed(bSavedHitStopRootMotionSuppressed);
 		}
 	}
 
 private:
 	uint8 bSavedAbilityRootMotionSuppressed : 1 = false;
 	uint8 bSavedAbilityMovementInputSuppressed : 1 = false;
-	uint8 bSavedHitStopRootMotionSuppressed : 1 = false;
 };
 
 // Client prediction data is only customized so it can allocate our saved move type.
@@ -109,14 +104,6 @@ void UPL_CharacterMovementComponent::SetAbilityRootMotionSuppressed(bool bInSupp
 	RefreshAbilityRootMotionMode();
 }
 
-void UPL_CharacterMovementComponent::SetHitStopRootMotionSuppressed(bool bInSuppressed)
-{
-	if (bHitStopRootMotionSuppressed == bInSuppressed) return;
-
-	bHitStopRootMotionSuppressed = bInSuppressed;
-	RefreshAbilityRootMotionMode();
-}
-
 void UPL_CharacterMovementComponent::SetAbilityMovementInputSuppressed(bool bInSuppressed)
 {
 	// Input suppression is separate so collision can stop root motion without unlocking movement.
@@ -134,14 +121,42 @@ void UPL_CharacterMovementComponent::RefreshAbilityRootMotionMode()
 	if (!AnimInstance) return;
 
 	// Keep the anim instance in the same root-motion mode as the predicted CMC flag.
-	const bool bRootMotionEnabled =
-		!bAbilityRootMotionSuppressed &&
-		!bHitStopRootMotionSuppressed;
+	const bool bRootMotionEnabled = !bAbilityRootMotionSuppressed;
 	AnimInstance->bRootMotionEnabled = bRootMotionEnabled;
-	AnimInstance->SetRootMotionMode(
-		bRootMotionEnabled
+	AnimInstance->SetRootMotionMode(bRootMotionEnabled
 			? ERootMotionMode::RootMotionFromMontagesOnly
 			: ERootMotionMode::IgnoreRootMotion);
+}
+
+float UPL_CharacterMovementComponent::GetMaxSpeed() const
+{
+	const float BaseSpeed = Super::GetMaxSpeed();
+	if (BaseSpeed <= 0.f) return BaseSpeed;
+
+	const APawn* PawnOwnerPtr = PawnOwner;
+	if (!PawnOwnerPtr) return BaseSpeed;
+
+	if (const APL_BaseCharacter* CharacterOwnerPtr = Cast<APL_BaseCharacter>(PawnOwnerPtr))
+	{
+		if (const UPL_CombatComponent* CombatComponent = CharacterOwnerPtr->GetCombatComponent())
+		{
+			if (CombatComponent->IsBlockingActive()) return BaseSpeed;
+		}
+	}
+
+	const FVector CurrentAcceleration = Acceleration.GetSafeNormal2D();
+	if (CurrentAcceleration.IsNearlyZero()) return BaseSpeed;
+
+	const FVector Forward = PawnOwnerPtr->GetActorForwardVector().GetSafeNormal2D();
+	if (Forward.IsNearlyZero()) return BaseSpeed;
+
+	const float ForwardDot = FVector::DotProduct(Forward, CurrentAcceleration);
+	if (ForwardDot <= BackwardDotThreshold)
+	{
+		return BaseSpeed * BackwardSpeedMultiplier;
+	}
+
+	return BaseSpeed;
 }
 
 void UPL_CharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
@@ -151,7 +166,6 @@ void UPL_CharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 	// Movement prediction decodes these bits from the compressed move.
 	bAbilityRootMotionSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressAbilityRootMotion) != 0;
 	bAbilityMovementInputSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressAbilityMovementInput) != 0;
-	bHitStopRootMotionSuppressed = (Flags & PLAbilityRootMotionFlags::SuppressHitStopRootMotion) != 0;
 	RefreshAbilityRootMotionMode();
 }
 

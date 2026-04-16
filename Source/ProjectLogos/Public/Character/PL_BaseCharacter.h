@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
+#include "ActiveGameplayEffectHandle.h"
 #include "GameFramework/Character.h"
 #include "PL_BaseCharacter.generated.h"
 
@@ -9,6 +10,7 @@ class UPL_CombatComponent;
 class UAbilitySystemComponent;
 class UAttributeSet;
 class UAnimMontage;
+class UGameplayEffect;
 struct FTimerHandle;
 
 // Replicated ability animation state shared by montage abilities and animation code.
@@ -53,18 +55,6 @@ struct FRepAbilityAnimState
 	}
 };
 
-USTRUCT(BlueprintType)
-struct FRepHitStopState
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bActive = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float TimeScale = 0.f;
-};
-
 UCLASS()
 class PROJECTLOGOS_API APL_BaseCharacter : public ACharacter, public IAbilitySystemInterface
 {
@@ -88,45 +78,32 @@ public:
 	void ResetAbilityAnimState();
 
 	UFUNCTION(BlueprintCallable, Category="HitStop")
-	void SetHitStopState(const FRepHitStopState& NewState);
-
-	UFUNCTION(BlueprintCallable, Category="HitStop")
-	void StartHitStop(float Duration, float TimeScale = 0.f);
-
-	UFUNCTION(BlueprintCallable, Category="HitStop")
-	void ClearHitStopState();
-
+	void ApplyHitStop(float Duration, float TimeScale = 0.f);
+	
 	const FRepAbilityAnimState& GetAbilityAnimState() const { return AbilityAnimState; }
-	const FRepHitStopState& GetHitStopState() const { return HitStopState; }
 	UPL_CombatComponent* GetCombatComponent() const { return CombatComponent; }
+	
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
 protected:
 	// Character setup.
 	virtual void InitializeDefaultAttributes();
-	
-	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
+	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass, float Level = 1.f) const;
 	
 	// Replicated state.
 	UPROPERTY(ReplicatedUsing=OnRep_AbilityAnimState)
 	FRepAbilityAnimState AbilityAnimState;
 
-	UPROPERTY(ReplicatedUsing=OnRep_HitStopState)
-	FRepHitStopState HitStopState;
+	UPROPERTY()
+	bool bHasHitStopped = false;
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetAbilityAnimState(const FRepAbilityAnimState& NewState);
-
-	UFUNCTION(Server, Reliable)
-	void ServerSetHitStopState(const FRepHitStopState& NewState);
-
+	
 	UFUNCTION()
 	void OnRep_AbilityAnimState();
 
-	UFUNCTION()
-	void OnRep_HitStopState();
-
 	void ApplyAbilityAnimState(const FRepAbilityAnimState& NewState);
-	void ApplyHitStopState(const FRepHitStopState& NewState);
 	
 	// GAS references. Player characters receive these from PlayerState.
 	UPROPERTY(BlueprintReadWrite)
@@ -134,13 +111,11 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UAttributeSet> AttributeSet;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Attributes")
+	TArray<TSubclassOf<UGameplayEffect>> DefaultAttributeEffects;
 	
 	// Combat setup and reactions.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat")
 	TObjectPtr<UPL_CombatComponent> CombatComponent = nullptr;
-	
-	UPROPERTY(Transient)
-	TObjectPtr<UAnimMontage> HitStopPausedMontage = nullptr;
-
-	FTimerHandle HitStopTimerHandle;
 };

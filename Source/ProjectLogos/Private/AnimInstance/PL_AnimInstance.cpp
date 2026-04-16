@@ -54,10 +54,7 @@ void UPL_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const bool bHasAbilityContext = GetAbilityPercentMontagePlayed(Percent, Ability);
 
 	// Root-motion abilities own facing until root motion is released or lower-body blending starts.
-	const bool bAbilityOwnsRotation =
-		bHasAbilityContext &&
-		bRootMotionEnabled &&
-		!bShouldBlendLowerBody;
+	const bool bAbilityOwnsRotation = bHasAbilityContext && bRootMotionEnabled && !bShouldBlendLowerBody;
 
 	const bool bAllowControllerYaw = !bAbilityOwnsRotation && bIsAccelerating;
 
@@ -89,8 +86,7 @@ void UPL_AnimInstance::UpdateAbilityAnimReplication()
 
 	// Retriggering the same instanced ability can replay the same montage asset, so
 	// reset per-run state when either the montage or the activation sequence changes.
-	if (Ability != LastTrackedAbility
-		|| CurrentActivationSequenceId != LastTrackedAbilityActivationSequenceId
+	if (Ability != LastTrackedAbility || CurrentActivationSequenceId != LastTrackedAbilityActivationSequenceId
 		|| CurrentMontage != LastTrackedMontage)
 	{
 		LastTrackedAbility = Ability;
@@ -104,17 +100,20 @@ void UPL_AnimInstance::UpdateAbilityAnimReplication()
 		(Percent >= Ability->MontageLockout.MontageProgressBeforeInterrupt);
 
 	// Movement input after the release point allows lower-body blending and stops root motion.
-	const bool bHasMovementInput =
-		CharacterMovementComponent &&
+	const bool bHasMovementInput = CharacterMovementComponent &&
 		!CharacterMovementComponent->GetCurrentAcceleration().IsNearlyZero(0.01f);
 
 	if (bReachedReleasePoint && bHasMovementInput)
+	{
 		bReleasedRootMotionThisMontage = true;
-
+	}
+	
 	// Collision can stop displacement early, but movement stays locked until release.
 	if (Ability->IsRootMotionStoppedByCollision())
+	{
 		bReleasedRootMotionThisMontage = true;
-
+	}
+	
 	FRepAbilityAnimState DesiredState;
 	DesiredState.bCanBlendMontage = bReachedReleasePoint;
 	DesiredState.bShouldBlendLowerBody = bReachedReleasePoint && bHasMovementInput;
@@ -166,7 +165,9 @@ bool UPL_AnimInstance::GetAbilityPercentMontagePlayed(float& OutPercent, UPL_Gam
 UAbilitySystemComponent* UPL_AnimInstance::GetAbilitySystemComponentSafe()
 {
 	if (!AbilitySystemComponent && Character)
+	{
 		AbilitySystemComponent = Character->GetAbilitySystemComponent();
-
+	}
+	
 	return AbilitySystemComponent;
 }
