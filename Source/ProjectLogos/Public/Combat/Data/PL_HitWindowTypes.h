@@ -24,16 +24,20 @@ struct FPLHitWindowShapeSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape")
 	EPLHitDetectionShapeType ShapeType = EPLHitDetectionShapeType::Capsule;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape", meta=(ClampMin="0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
+		meta=(EditCondition="ShapeType == EPLHitDetectionShapeType::Sphere", EditConditionHides, ClampMin="0.0"))
 	float SphereRadius = 30.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape", meta=(ClampMin="0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
+		meta=(EditCondition="ShapeType == EPLHitDetectionShapeType::Capsule", EditConditionHides, ClampMin="0.0"))
 	float CapsuleRadius = 10.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape", meta=(ClampMin="0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
+		meta=(EditCondition="ShapeType == EPLHitDetectionShapeType::Capsule", EditConditionHides, ClampMin="0.0"))
 	float CapsuleHalfHeight = 50.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
+		meta=(EditCondition="ShapeType == EPLHitDetectionShapeType::Box", EditConditionHides))
 	FVector BoxHalfExtent = FVector(10.f, 10.f, 40.f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape")
@@ -67,9 +71,42 @@ UENUM(BlueprintType)
 enum class EPLHitWindowMoveDirection : uint8
 {
 	None UMETA(DisplayName="None"),
+	KeepCurrentDistance UMETA(DisplayName="Keep Current Distance"),
 	MoveCloser UMETA(DisplayName="Move Closer"),
 	MoveAway UMETA(DisplayName="Move Away"),
 	SnapToDistance UMETA(DisplayName="Snap To Distance")
+};
+
+UENUM(BlueprintType)
+enum class EPLHitWindowLateralOffsetMode : uint8
+{
+	KeepCurrent UMETA(DisplayName="Keep Current"),
+	AddOffset UMETA(DisplayName="Add Offset"),
+	SnapToOffset UMETA(DisplayName="Snap To Offset")
+};
+
+UENUM(BlueprintType)
+enum class EPLHitWindowTransformTriggerTiming : uint8
+{
+	OnHit UMETA(DisplayName="On Hit"),
+	OnActivation UMETA(DisplayName="On Activation"),
+	Both UMETA(DisplayName="Both")
+};
+
+UENUM(BlueprintType)
+enum class EPLHitWindowTransformRecipient : uint8
+{
+	Instigator UMETA(DisplayName="Instigator"),
+	Target UMETA(DisplayName="Target"),
+	Both UMETA(DisplayName="Both")
+};
+
+UENUM(BlueprintType)
+enum class EPLHitWindowReferenceActorSource : uint8
+{
+	Instigator UMETA(DisplayName="Instigator"),
+	Target UMETA(DisplayName="Target"),
+	LastCombatReferenceActor UMETA(DisplayName="Last Combat Reference Actor")
 };
 
 UENUM(BlueprintType)
@@ -95,8 +132,28 @@ struct FPLHitWindowMovementSettings
 	EPLHitWindowMoveDirection MoveDirection = EPLHitWindowMoveDirection::None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
-		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides, ClampMin="0.0"))
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides))
+	EPLHitWindowTransformTriggerTiming TriggerTiming = EPLHitWindowTransformTriggerTiming::OnHit;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides))
+	EPLHitWindowTransformRecipient Recipient = EPLHitWindowTransformRecipient::Target;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides))
+	EPLHitWindowReferenceActorSource ReferenceActorSource = EPLHitWindowReferenceActorSource::Instigator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None && MoveDirection != EPLHitWindowMoveDirection::KeepCurrentDistance", EditConditionHides, ClampMin="0.0"))
 	float MoveDistance = 25.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides))
+	EPLHitWindowLateralOffsetMode LateralOffsetMode = EPLHitWindowLateralOffsetMode::KeepCurrent;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None && LateralOffsetMode != EPLHitWindowLateralOffsetMode::KeepCurrent", EditConditionHides))
+	float LateralOffset = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
 		meta=(EditCondition="MoveDirection != EPLHitWindowMoveDirection::None", EditConditionHides))
@@ -111,9 +168,9 @@ UENUM(BlueprintType)
 enum class EPLHitWindowRotationDirection : uint8
 {
 	None UMETA(DisplayName="None"),
-	FaceToFace UMETA(DisplayName="Face Instigator"),
-	FaceAway UMETA(DisplayName="Face Away"),
-	FaceOppositeInstigatorForward UMETA(DisplayName="Face Opposite Instigator Forward"),
+	FaceToFace UMETA(DisplayName="Face Reference Actor"),
+	FaceAway UMETA(DisplayName="Face Away From Reference"),
+	FaceOppositeInstigatorForward UMETA(DisplayName="Face Opposite Reference Forward"),
 	FaceDirection UMETA(DisplayName="Face Direction")
 };
 
@@ -124,6 +181,18 @@ struct FPLHitWindowRotationSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation")
 	EPLHitWindowRotationDirection RotationDirection = EPLHitWindowRotationDirection::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
+		meta=(EditCondition="RotationDirection != EPLHitWindowRotationDirection::None", EditConditionHides))
+	EPLHitWindowTransformTriggerTiming TriggerTiming = EPLHitWindowTransformTriggerTiming::OnHit;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
+		meta=(EditCondition="RotationDirection != EPLHitWindowRotationDirection::None", EditConditionHides))
+	EPLHitWindowTransformRecipient Recipient = EPLHitWindowTransformRecipient::Target;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
+		meta=(EditCondition="RotationDirection != EPLHitWindowRotationDirection::None", EditConditionHides))
+	EPLHitWindowReferenceActorSource ReferenceActorSource = EPLHitWindowReferenceActorSource::Instigator;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
 		meta=(EditCondition="RotationDirection == EPLHitWindowRotationDirection::FaceDirection", EditConditionHides))
@@ -171,6 +240,32 @@ enum class EPLHitWindowSuperArmorLevel : uint8
 	SuperArmor1 UMETA(DisplayName="Super Armor 1"),
 	SuperArmor2 UMETA(DisplayName="Super Armor 2"),
 	SuperArmor3 UMETA(DisplayName="Super Armor 3")
+};
+
+USTRUCT(BlueprintType)
+struct FPLHitWindowDefenseSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Defense",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowBlockSettings BlockSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Defense",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowDodgeSettings DodgeSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Defense")
+	EPLHitWindowSuperArmorLevel RequiredSuperArmor = EPLHitWindowSuperArmorLevel::None;
+};
+
+USTRUCT(BlueprintType)
+struct FPLHitWindowDebugSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Debug")
+	bool bDrawDebugTrace = false;
 };
 
 UENUM(BlueprintType)
@@ -236,4 +331,42 @@ struct FPLHitWindowGameplayCue
 	{
 		return CueTag.IsValid();
 	}
+};
+
+USTRUCT(BlueprintType)
+struct FPLHitWindowSettings
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Debug",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowDebugSettings DebugSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowShapeSettings ShapeSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitStopSettings HitStopSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowMovementSettings MovementSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowRotationSettings RotationSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Defense",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowDefenseSettings DefenseSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
+		meta=(TitleProperty="GameplayEffectClass"))
+	TArray<FPLHitWindowGameplayEffect> GameplayEffectsToApply;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Gameplay Cues",
+		meta=(TitleProperty="CueTag"))
+	TArray<FPLHitWindowGameplayCue> GameplayCuesToExecute;
 };

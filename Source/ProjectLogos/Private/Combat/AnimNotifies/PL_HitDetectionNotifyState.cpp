@@ -15,10 +15,7 @@ void UPL_HitDetectionNotifyState::NotifyBegin(USkeletalMeshComponent* MeshComp, 
 
 	if (CombatComponent)
 	{
-		CombatComponent->BeginHitDetectionWindow(this, MeshComp, DebugSocketName,
-			HitShapeSettings, HitStopSettings, MovementSettings, RotationSettings, BlockSettings, DodgeSettings,
-			RequiredSuperArmor,
-			GameplayEffectsToApply, GameplayCuesToExecute);
+		CombatComponent->BeginHitDetectionWindow(this, MeshComp, TraceSocketName, HitWindowSettings);
 	}
 }
 

@@ -51,6 +51,7 @@ void UPL_CombatComponent::DeinitializeCombat()
 	ActiveHitDetectionWindows.Reset();
 	ActiveHitDetectionWindowCounts.Reset();
 	ResetActiveHitDebugWindow();
+	LastCombatReferenceActor.Reset();
 
 	OwningCharacter = nullptr;
 	AbilitySystemComponent = nullptr;
@@ -86,6 +87,39 @@ bool UPL_CombatComponent::IsBlockingActive() const
 	return AbilitySystemComponent
 		&& BlockingTag.IsValid()
 		&& AbilitySystemComponent->HasMatchingGameplayTag(BlockingTag);
+}
+
+bool UPL_CombatComponent::IsParryingActive() const
+{
+	return AbilitySystemComponent
+		&& ParryingTag.IsValid()
+		&& AbilitySystemComponent->HasMatchingGameplayTag(ParryingTag);
+}
+
+bool UPL_CombatComponent::DoesTransformTimingMatch(const EPLHitWindowTransformTriggerTiming ConfiguredTiming,
+	const EPLHitWindowTransformTriggerTiming InvocationTiming)
+{
+	return ConfiguredTiming == EPLHitWindowTransformTriggerTiming::Both || ConfiguredTiming == InvocationTiming;
+}
+
+UPL_CombatComponent* UPL_CombatComponent::FindCombatComponent(AActor* Actor)
+{
+	if (!Actor)
+	{
+		return nullptr;
+	}
+
+	if (APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(Actor))
+	{
+		return Character->GetCombatComponent();
+	}
+
+	return Actor->FindComponentByClass<UPL_CombatComponent>();
+}
+
+void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
+{
+	LastCombatReferenceActor = InActor && InActor != GetOwner() ? InActor : nullptr;
 }
 
 bool UPL_CombatComponent::HasSuperArmorAtOrAbove(const EPLHitWindowSuperArmorLevel RequiredSuperArmor) const
@@ -466,13 +500,14 @@ void UPL_CombatComponent::RunHitDebugQuery(const FTransform& StartTransform, con
 	const FQuat EndRotation = EndTransform.GetRotation();
 	const FQuat SweepRotation = EndTransform.GetRotation();
 
-	const float SphereRadius = FMath::Max(0.f, ActiveHitShapeSettings.SphereRadius);
-	const float CapsuleRadius = FMath::Max(0.f, ActiveHitShapeSettings.CapsuleRadius);
-	const float CapsuleHalfHeight = FMath::Max(CapsuleRadius, ActiveHitShapeSettings.CapsuleHalfHeight);
-	const FVector BoxHalfExtent = ActiveHitShapeSettings.BoxHalfExtent.ComponentMax(FVector::ZeroVector);
+	const FPLHitWindowShapeSettings& ShapeSettings = ActiveHitWindowSettings.ShapeSettings;
+	const float SphereRadius = FMath::Max(0.f, ShapeSettings.SphereRadius);
+	const float CapsuleRadius = FMath::Max(0.f, ShapeSettings.CapsuleRadius);
+	const float CapsuleHalfHeight = FMath::Max(CapsuleRadius, ShapeSettings.CapsuleHalfHeight);
+	const FVector BoxHalfExtent = ShapeSettings.BoxHalfExtent.ComponentMax(FVector::ZeroVector);
 
 	FCollisionShape CollisionShape;
-	switch (ActiveHitShapeSettings.ShapeType)
+	switch (ShapeSettings.ShapeType)
 	{
 		case EPLHitDetectionShapeType::Capsule:
 			CollisionShape = FCollisionShape::MakeCapsule(CapsuleRadius, CapsuleHalfHeight);
@@ -490,7 +525,7 @@ void UPL_CombatComponent::RunHitDebugQuery(const FTransform& StartTransform, con
 
 	if (bDrawDebug)
 	{
-		switch (ActiveHitShapeSettings.ShapeType)
+		switch (ShapeSettings.ShapeType)
 		{
 			case EPLHitDetectionShapeType::Capsule:
 				DrawDebugCapsule(World, EndLocation, CapsuleHalfHeight, CapsuleRadius, SweepRotation,
@@ -578,7 +613,7 @@ void UPL_CombatComponent::DebugSweepActiveHitWindow()
 	const FTransform CurrentTransform = GetHitTraceWorldTransform(
 		ActiveHitDebugMesh,
 		ActiveHitDebugSocketName,
-		ActiveHitShapeSettings);
+		ActiveHitWindowSettings.ShapeSettings);
 
 	if (!bHasPreviousHitDebugLocation)
 	{
@@ -586,7 +621,10 @@ void UPL_CombatComponent::DebugSweepActiveHitWindow()
 		bHasPreviousHitDebugLocation = true;
 	}
 
-	RunHitDebugQuery(PreviousHitDebugTransform, CurrentTransform, true);
+	RunHitDebugQuery(
+		PreviousHitDebugTransform,
+		CurrentTransform,
+		ActiveHitWindowSettings.DebugSettings.bDrawDebugTrace);
 	PreviousHitDebugTransform = CurrentTransform;
 }
 
@@ -599,15 +637,7 @@ void UPL_CombatComponent::ResetActiveHitDebugWindow()
 	bHasPreviousHitDebugLocation = false;
 	HitActorsThisWindow.Reset();
 	ActiveHitDebugWindowDepth = 0;
-	ActiveHitShapeSettings = FPLHitWindowShapeSettings();
-	ActiveHitStopSettings = FPLHitStopSettings();
-	ActiveHitMovementSettings = FPLHitWindowMovementSettings();
-	ActiveHitRotationSettings = FPLHitWindowRotationSettings();
-	ActiveHitBlockSettings = FPLHitWindowBlockSettings();
-	ActiveHitDodgeSettings = FPLHitWindowDodgeSettings();
-	ActiveHitRequiredSuperArmor = EPLHitWindowSuperArmorLevel::None;
-	ActiveGameplayEffectsToApply.Reset();
-	ActiveGameplayCuesToExecute.Reset();
+	ActiveHitWindowSettings = FPLHitWindowSettings();
 	bHasTriggeredHitStopThisWindow = false;
 
 	SetComponentTickEnabled(false);
@@ -635,9 +665,10 @@ void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHi
 
 	const bool bIsAuthority = GetOwner() && GetOwner()->HasAuthority();
 	const bool bWasBlocked = bIsAuthority && IsAttackBlocked(HitActor);
+	const bool bWasParried = bWasBlocked && IsAttackParried(HitActor);
 	const bool bWasDodged = bIsAuthority && IsAttackDodged(HitActor);
 	const bool bHasSuperArmor = bIsAuthority && HasRequiredSuperArmor(HitActor);
-	const bool bHasDefenseOutcome = bWasBlocked || bWasDodged || bHasSuperArmor;
+	const bool bHasDefenseOutcome = bWasBlocked || bWasParried || bWasDodged || bHasSuperArmor;
 
 	if (bIsAuthority)
 	{
@@ -646,11 +677,21 @@ void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHi
 
 	if (bHasDefenseOutcome)
 	{
-		ApplyDefenseGameplayEffects(HitActor, HitResult, bWasBlocked, bWasDodged, bHasSuperArmor);
+		if (bWasParried)
+		{
+			SetLastCombatReferenceActor(HitActor);
+
+			if (UPL_CombatComponent* TargetCombatComponent = FindCombatComponent(HitActor))
+			{
+				TargetCombatComponent->SetLastCombatReferenceActor(GetOwner());
+			}
+		}
+
+		ApplyDefenseGameplayEffects(HitActor, HitResult, bWasBlocked, bWasParried, bWasDodged, bHasSuperArmor);
 		return;
 	}
 
-	if (!ActiveGameplayEffectsToApply.IsEmpty() && bIsAuthority)
+	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty() && bIsAuthority)
 	{
 		if (UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor))
 		{
@@ -658,7 +699,7 @@ void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHi
 			ContextHandle.AddSourceObject(this);
 			ContextHandle.AddHitResult(HitResult);
 
-			for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveGameplayEffectsToApply)
+			for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveHitWindowSettings.GameplayEffectsToApply)
 			{
 				if (!GameplayEffectToApply.GameplayEffectClass) continue;
 
@@ -676,9 +717,11 @@ void UPL_CombatComponent::TryApplyHitGameplayEffects(AActor* HitActor, const FHi
 
 	ExecuteHitWindowGameplayCues(HitActor, &HitResult, EPLHitWindowCueTriggerTiming::OnHit);
 
-	if (!bHasTriggeredHitStopThisWindow && ActiveHitStopSettings.IsEnabled() && OwningCharacter)
+	if (!bHasTriggeredHitStopThisWindow && ActiveHitWindowSettings.HitStopSettings.IsEnabled() && OwningCharacter)
 	{
-		OwningCharacter->ApplyHitStop(ActiveHitStopSettings.Duration, ActiveHitStopSettings.TimeScale);
+		OwningCharacter->ApplyHitStop(
+			ActiveHitWindowSettings.HitStopSettings.Duration,
+			ActiveHitWindowSettings.HitStopSettings.TimeScale);
 		bHasTriggeredHitStopThisWindow = true;
 	}
 }
@@ -688,93 +731,255 @@ void UPL_CombatComponent::ApplyHitWindowTransformEffects(AActor* HitActor, const
 {
 	if (!HitActor || HitActor == GetOwner()) return;
 
-	ApplyHitWindowRotation(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
-	ApplyHitWindowMovement(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
+	ApplyHitWindowRotation(HitActor, EPLHitWindowTransformTriggerTiming::OnHit, bWasBlocked, bWasDodged, bHasSuperArmor);
+	ApplyHitWindowMovement(HitActor, EPLHitWindowTransformTriggerTiming::OnHit, bWasBlocked, bWasDodged, bHasSuperArmor);
 }
 
-void UPL_CombatComponent::ApplyHitWindowMovement(AActor* HitActor, const bool bWasBlocked,
+void UPL_CombatComponent::ApplyActivationTransformEffects() const
+{
+	ApplyHitWindowRotation(nullptr, EPLHitWindowTransformTriggerTiming::OnActivation, false, false, false);
+	ApplyHitWindowMovement(nullptr, EPLHitWindowTransformTriggerTiming::OnActivation, false, false, false);
+}
+
+void UPL_CombatComponent::ApplyHitWindowMovement(AActor* HitActor,
+	const EPLHitWindowTransformTriggerTiming InvocationTiming, const bool bWasBlocked,
 	const bool bWasDodged, const bool bHasSuperArmor) const
 {
-	AActor* const OwnerActor = GetOwner();
-	if (!OwnerActor || !HitActor) return;
-	if (bWasDodged || bHasSuperArmor) return;
-	if (bWasBlocked && !ActiveHitBlockSettings.bAllowMovementWhenBlocked) return;
-
-	const FPLHitWindowMovementSettings& MovementSettings = ActiveHitMovementSettings;
+	const FPLHitWindowMovementSettings& MovementSettings = ActiveHitWindowSettings.MovementSettings;
 	if (MovementSettings.MoveDirection == EPLHitWindowMoveDirection::None || MovementSettings.MoveDistance <= 0.f)
 	{
 		return;
 	}
 
-	FVector InstigatorForward = OwnerActor->GetActorForwardVector();
-	InstigatorForward.Z = 0.f;
-	InstigatorForward = InstigatorForward.GetSafeNormal();
-
-	if (InstigatorForward.IsNearlyZero())
+	if (!DoesTransformTimingMatch(MovementSettings.TriggerTiming, InvocationTiming))
 	{
 		return;
 	}
 
-	FVector MoveDirection = InstigatorForward;
-	float MoveDistance = MovementSettings.MoveDistance;
+	if (InvocationTiming == EPLHitWindowTransformTriggerTiming::OnHit)
+	{
+		if (bWasDodged || bHasSuperArmor)
+		{
+			return;
+		}
+
+		if (bWasBlocked && !ActiveHitWindowSettings.DefenseSettings.BlockSettings.bAllowMovementWhenBlocked)
+		{
+			return;
+		}
+	}
+
+	AActor* const OwnerActor = GetOwner();
+	AActor* const TargetActor = HitActor ? HitActor : LastCombatReferenceActor.Get();
+	AActor* const ReferenceActor = ResolveTransformReferenceActor(
+		MovementSettings.ReferenceActorSource,
+		HitActor,
+		InvocationTiming);
+
+	auto ApplyToRecipient = [this, &MovementSettings, ReferenceActor](AActor* RecipientActor)
+	{
+		if (!RecipientActor || !ReferenceActor || RecipientActor == ReferenceActor)
+		{
+			return;
+		}
+
+		ApplyMovementToActor(RecipientActor, ReferenceActor, MovementSettings);
+	};
+
+	switch (MovementSettings.Recipient)
+	{
+	case EPLHitWindowTransformRecipient::Instigator:
+		ApplyToRecipient(OwnerActor);
+		break;
+
+	case EPLHitWindowTransformRecipient::Target:
+		ApplyToRecipient(TargetActor);
+		break;
+
+	case EPLHitWindowTransformRecipient::Both:
+		ApplyToRecipient(OwnerActor);
+		if (TargetActor && TargetActor != OwnerActor)
+		{
+			ApplyToRecipient(TargetActor);
+		}
+		break;
+
+	default:
+		return;
+	}
+}
+
+void UPL_CombatComponent::ApplyMovementToActor(AActor* RecipientActor, AActor* ReferenceActor,
+	const FPLHitWindowMovementSettings& MovementSettings) const
+{
+	if (!RecipientActor || !ReferenceActor) return;
+
+	const FVector ReferenceLocation = ReferenceActor->GetActorLocation();
+	const FVector RecipientLocation = RecipientActor->GetActorLocation();
+
+	FVector ReferenceForward = ReferenceActor->GetActorForwardVector();
+	ReferenceForward.Z = 0.f;
+	ReferenceForward = ReferenceForward.GetSafeNormal();
+
+	if (ReferenceForward.IsNearlyZero())
+	{
+		return;
+	}
+
+	FVector ReferenceRight = ReferenceActor->GetActorRightVector();
+	ReferenceRight.Z = 0.f;
+	ReferenceRight = ReferenceRight.GetSafeNormal();
+
+	if (ReferenceRight.IsNearlyZero())
+	{
+		ReferenceRight = FVector::CrossProduct(FVector::UpVector, ReferenceForward).GetSafeNormal();
+	}
+
+	const FVector RelativeLocation = RecipientLocation - ReferenceLocation;
+	const float CurrentForwardProjection = FVector::DotProduct(RelativeLocation, ReferenceForward);
+	const float CurrentLateralProjection = FVector::DotProduct(RelativeLocation, ReferenceRight);
+
+	float TargetForwardProjection = CurrentForwardProjection;
+	float TargetLateralProjection = CurrentLateralProjection;
 
 	switch (MovementSettings.MoveDirection)
 	{
+	case EPLHitWindowMoveDirection::KeepCurrentDistance:
+		break;
+
 	case EPLHitWindowMoveDirection::MoveCloser:
-		MoveDirection *= -1.f;
+		TargetForwardProjection -= MovementSettings.MoveDistance;
 		break;
 
 	case EPLHitWindowMoveDirection::MoveAway:
+		TargetForwardProjection += MovementSettings.MoveDistance;
 		break;
 
 	case EPLHitWindowMoveDirection::SnapToDistance:
-		{
-			const FVector OwnerLocation = OwnerActor->GetActorLocation();
-			const FVector TargetLocation = HitActor->GetActorLocation();
-			const float CurrentProjection = FVector::DotProduct(TargetLocation - OwnerLocation, InstigatorForward);
-			MoveDistance = MovementSettings.MoveDistance - CurrentProjection;
-			break;
-		}
+		TargetForwardProjection = MovementSettings.MoveDistance;
+		break;
 
 	case EPLHitWindowMoveDirection::None:
 	default:
 		return;
 	}
 
-	if (FMath::IsNearlyZero(MoveDistance))
+	switch (MovementSettings.LateralOffsetMode)
+	{
+	case EPLHitWindowLateralOffsetMode::KeepCurrent:
+		break;
+
+	case EPLHitWindowLateralOffsetMode::AddOffset:
+		TargetLateralProjection += MovementSettings.LateralOffset;
+		break;
+
+	case EPLHitWindowLateralOffsetMode::SnapToOffset:
+		TargetLateralProjection = MovementSettings.LateralOffset;
+		break;
+
+	default:
+		break;
+	}
+
+	if (FMath::IsNearlyEqual(TargetForwardProjection, CurrentForwardProjection)
+		&& FMath::IsNearlyEqual(TargetLateralProjection, CurrentLateralProjection))
 	{
 		return;
 	}
 
-	const FVector NewLocation = HitActor->GetActorLocation() + (MoveDirection * MoveDistance);
-	HitActor->SetActorLocation(NewLocation, MovementSettings.bSweep, nullptr, ToTeleportType(MovementSettings.TeleportType));
+	FVector NewLocation = ReferenceLocation
+		+ (ReferenceForward * TargetForwardProjection)
+		+ (ReferenceRight * TargetLateralProjection);
+	NewLocation.Z = RecipientLocation.Z;
+
+	RecipientActor->SetActorLocation(NewLocation, MovementSettings.bSweep, nullptr,
+		ToTeleportType(MovementSettings.TeleportType));
 }
 
-void UPL_CombatComponent::ApplyHitWindowRotation(AActor* HitActor, const bool bWasBlocked,
+void UPL_CombatComponent::ApplyHitWindowRotation(AActor* HitActor,
+	const EPLHitWindowTransformTriggerTiming InvocationTiming, const bool bWasBlocked,
 	const bool bWasDodged, const bool bHasSuperArmor) const
 {
-	AActor* const OwnerActor = GetOwner();
-	if (!OwnerActor || !HitActor) return;
-	if (bWasDodged || bHasSuperArmor) return;
-	if (bWasBlocked && !ActiveHitBlockSettings.bAllowRotationWhenBlocked) return;
-
-	const FPLHitWindowRotationSettings& RotationSettings = ActiveHitRotationSettings;
+	const FPLHitWindowRotationSettings& RotationSettings = ActiveHitWindowSettings.RotationSettings;
 	if (RotationSettings.RotationDirection == EPLHitWindowRotationDirection::None)
 	{
 		return;
 	}
 
-	const FVector InstigatorLocation = OwnerActor->GetActorLocation();
-	const FVector TargetLocation = HitActor->GetActorLocation();
-	FRotator DesiredRotation = HitActor->GetActorRotation();
+	if (!DoesTransformTimingMatch(RotationSettings.TriggerTiming, InvocationTiming))
+	{
+		return;
+	}
+
+	if (InvocationTiming == EPLHitWindowTransformTriggerTiming::OnHit)
+	{
+		if (bWasDodged || bHasSuperArmor)
+		{
+			return;
+		}
+
+		if (bWasBlocked && !ActiveHitWindowSettings.DefenseSettings.BlockSettings.bAllowRotationWhenBlocked)
+		{
+			return;
+		}
+	}
+
+	AActor* const OwnerActor = GetOwner();
+	AActor* const TargetActor = HitActor ? HitActor : LastCombatReferenceActor.Get();
+	AActor* const ReferenceActor = ResolveTransformReferenceActor(
+		RotationSettings.ReferenceActorSource,
+		HitActor,
+		InvocationTiming);
+
+	auto ApplyToRecipient = [this, &RotationSettings, ReferenceActor](AActor* RecipientActor)
+	{
+		if (!RecipientActor || !ReferenceActor || RecipientActor == ReferenceActor)
+		{
+			return;
+		}
+
+		ApplyRotationToActor(RecipientActor, ReferenceActor, RotationSettings);
+	};
+
+	switch (RotationSettings.Recipient)
+	{
+	case EPLHitWindowTransformRecipient::Instigator:
+		ApplyToRecipient(OwnerActor);
+		break;
+
+	case EPLHitWindowTransformRecipient::Target:
+		ApplyToRecipient(TargetActor);
+		break;
+
+	case EPLHitWindowTransformRecipient::Both:
+		ApplyToRecipient(OwnerActor);
+		if (TargetActor && TargetActor != OwnerActor)
+		{
+			ApplyToRecipient(TargetActor);
+		}
+		break;
+
+	default:
+		return;
+	}
+}
+
+void UPL_CombatComponent::ApplyRotationToActor(AActor* RecipientActor, AActor* ReferenceActor,
+	const FPLHitWindowRotationSettings& RotationSettings) const
+{
+	if (!RecipientActor || !ReferenceActor) return;
+
+	const FVector ReferenceLocation = ReferenceActor->GetActorLocation();
+	const FVector RecipientLocation = RecipientActor->GetActorLocation();
+	FRotator DesiredRotation = RecipientActor->GetActorRotation();
 
 	switch (RotationSettings.RotationDirection)
 	{
 	case EPLHitWindowRotationDirection::FaceToFace:
 		{
-			FVector ToInstigator = InstigatorLocation - TargetLocation;
-			ToInstigator.Z = 0.f;
-			if (const FVector FacingDirection = ToInstigator.GetSafeNormal(); !FacingDirection.IsNearlyZero())
+			FVector ToReference = ReferenceLocation - RecipientLocation;
+			ToReference.Z = 0.f;
+			if (const FVector FacingDirection = ToReference.GetSafeNormal(); !FacingDirection.IsNearlyZero())
 			{
 				DesiredRotation = FacingDirection.Rotation();
 			}
@@ -783,9 +988,9 @@ void UPL_CombatComponent::ApplyHitWindowRotation(AActor* HitActor, const bool bW
 
 	case EPLHitWindowRotationDirection::FaceAway:
 		{
-			FVector AwayFromInstigator = TargetLocation - InstigatorLocation;
-			AwayFromInstigator.Z = 0.f;
-			if (const FVector FacingDirection = AwayFromInstigator.GetSafeNormal(); !FacingDirection.IsNearlyZero())
+			FVector AwayFromReference = RecipientLocation - ReferenceLocation;
+			AwayFromReference.Z = 0.f;
+			if (const FVector FacingDirection = AwayFromReference.GetSafeNormal(); !FacingDirection.IsNearlyZero())
 			{
 				DesiredRotation = FacingDirection.Rotation();
 			}
@@ -794,7 +999,7 @@ void UPL_CombatComponent::ApplyHitWindowRotation(AActor* HitActor, const bool bW
 
 	case EPLHitWindowRotationDirection::FaceOppositeInstigatorForward:
 		{
-			FVector OppositeDirection = -OwnerActor->GetActorForwardVector();
+			FVector OppositeDirection = -ReferenceActor->GetActorForwardVector();
 			OppositeDirection.Z = 0.f;
 			if (const FVector FacingDirection = OppositeDirection.GetSafeNormal(); !FacingDirection.IsNearlyZero())
 			{
@@ -812,12 +1017,35 @@ void UPL_CombatComponent::ApplyHitWindowRotation(AActor* HitActor, const bool bW
 		return;
 	}
 
-	HitActor->SetActorRotation(DesiredRotation, ToTeleportType(RotationSettings.TeleportType));
+	RecipientActor->SetActorRotation(DesiredRotation, ToTeleportType(RotationSettings.TeleportType));
+}
+
+AActor* UPL_CombatComponent::ResolveTransformReferenceActor(
+	const EPLHitWindowReferenceActorSource ReferenceSource, AActor* HitActor,
+	const EPLHitWindowTransformTriggerTiming InvocationTiming) const
+{
+	switch (ReferenceSource)
+	{
+	case EPLHitWindowReferenceActorSource::Instigator:
+		return GetOwner();
+
+	case EPLHitWindowReferenceActorSource::Target:
+		return HitActor ? HitActor : (InvocationTiming == EPLHitWindowTransformTriggerTiming::OnActivation
+			? LastCombatReferenceActor.Get()
+			: nullptr);
+
+	case EPLHitWindowReferenceActorSource::LastCombatReferenceActor:
+		return LastCombatReferenceActor.Get();
+
+	default:
+		return nullptr;
+	}
 }
 
 bool UPL_CombatComponent::IsAttackBlocked(AActor* HitActor) const
 {
-	if (!ActiveHitBlockSettings.bBlockable || !HitActor) return false;
+	const FPLHitWindowBlockSettings& BlockSettings = ActiveHitWindowSettings.DefenseSettings.BlockSettings;
+	if (!BlockSettings.bBlockable || !HitActor) return false;
 	if (!BlockingTag.IsValid()) return false;
 
 	const UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor);
@@ -826,12 +1054,20 @@ bool UPL_CombatComponent::IsAttackBlocked(AActor* HitActor) const
 		return false;
 	}
 
-	return IsWithinBlockAngle(HitActor, GetOwner(), ActiveHitBlockSettings.BlockAngleDegrees);
+	return IsWithinBlockAngle(HitActor, GetOwner(), BlockSettings.BlockAngleDegrees);
+}
+
+bool UPL_CombatComponent::IsAttackParried(AActor* HitActor) const
+{
+	if (!HitActor) return false;
+
+	const UPL_CombatComponent* TargetCombatComponent = FindCombatComponent(HitActor);
+	return TargetCombatComponent && TargetCombatComponent->IsParryingActive();
 }
 
 bool UPL_CombatComponent::IsAttackDodged(AActor* HitActor) const
 {
-	if (!ActiveHitDodgeSettings.bDodgeable || !HitActor) return false;
+	if (!ActiveHitWindowSettings.DefenseSettings.DodgeSettings.bDodgeable || !HitActor) return false;
 	if (!DodgingTag.IsValid()) return false;
 
 	const UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor);
@@ -840,19 +1076,11 @@ bool UPL_CombatComponent::IsAttackDodged(AActor* HitActor) const
 
 bool UPL_CombatComponent::HasRequiredSuperArmor(AActor* HitActor) const
 {
-	if (ActiveHitRequiredSuperArmor == EPLHitWindowSuperArmorLevel::None || !HitActor) return false;
+	const EPLHitWindowSuperArmorLevel RequiredSuperArmor = ActiveHitWindowSettings.DefenseSettings.RequiredSuperArmor;
+	if (RequiredSuperArmor == EPLHitWindowSuperArmorLevel::None || !HitActor) return false;
 
-	const UPL_CombatComponent* TargetCombatComponent = nullptr;
-	if (const APL_BaseCharacter* TargetCharacter = Cast<APL_BaseCharacter>(HitActor))
-	{
-		TargetCombatComponent = TargetCharacter->GetCombatComponent();
-	}
-	else
-	{
-		TargetCombatComponent = HitActor->FindComponentByClass<UPL_CombatComponent>();
-	}
-
-	return TargetCombatComponent && TargetCombatComponent->HasSuperArmorAtOrAbove(ActiveHitRequiredSuperArmor);
+	const UPL_CombatComponent* TargetCombatComponent = FindCombatComponent(HitActor);
+	return TargetCombatComponent && TargetCombatComponent->HasSuperArmorAtOrAbove(RequiredSuperArmor);
 }
 
 bool UPL_CombatComponent::IsWithinBlockAngle(const AActor* DefenderActor, const AActor* AttackerActor,
@@ -868,9 +1096,14 @@ bool UPL_CombatComponent::IsWithinBlockAngle(const AActor* DefenderActor, const 
 }
 
 void UPL_CombatComponent::ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,
-	const bool bWasBlocked, const bool bWasDodged, const bool bHasSuperArmor) const
+	const bool bWasBlocked, const bool bWasParried, const bool bWasDodged, const bool bHasSuperArmor) const
 {
-	if (bWasBlocked)
+	if (bWasParried)
+	{
+		ApplyGameplayEffectToActor(GetOwner(), AttackerParriedEffectClass, 1.f, &HitResult);
+		ApplyGameplayEffectToActor(HitActor, DefenderParrySuccessEffectClass, 1.f, &HitResult);
+	}
+	else if (bWasBlocked)
 	{
 		ApplyGameplayEffectToActor(GetOwner(), AttackerBlockedEffectClass, 1.f, &HitResult);
 		ApplyGameplayEffectToActor(HitActor, DefenderBlockedEffectClass, 1.f, &HitResult);
@@ -921,7 +1154,7 @@ void UPL_CombatComponent::ApplyGameplayEffectToActor(AActor* RecipientActor,
 void UPL_CombatComponent::ExecuteHitWindowGameplayCues(AActor* HitActor, const FHitResult* HitResult,
 	const EPLHitWindowCueTriggerTiming TriggerTiming) const
 {
-	if (!AbilitySystemComponent || ActiveGameplayCuesToExecute.IsEmpty()) return;
+	if (!AbilitySystemComponent || ActiveHitWindowSettings.GameplayCuesToExecute.IsEmpty()) return;
 
 	AActor* const OwnerActor = GetOwner();
 	UAbilitySystemComponent* const InstigatorASC = AbilitySystemComponent;
@@ -929,7 +1162,7 @@ void UPL_CombatComponent::ExecuteHitWindowGameplayCues(AActor* HitActor, const F
 		? UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor)
 		: nullptr;
 
-	for (const FPLHitWindowGameplayCue& Cue : ActiveGameplayCuesToExecute)
+	for (const FPLHitWindowGameplayCue& Cue : ActiveHitWindowSettings.GameplayCuesToExecute)
 	{
 		if (Cue.TriggerTiming != TriggerTiming) continue;
 
@@ -1065,12 +1298,7 @@ USceneComponent* UPL_CombatComponent::GetGameplayCueAttachComponent(UAbilitySyst
 }
 
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
-	FName DebugSocketName, const FPLHitWindowShapeSettings& HitShapeSettings, const FPLHitStopSettings& HitStopSettings,
-	const FPLHitWindowMovementSettings& MovementSettings, const FPLHitWindowRotationSettings& RotationSettings,
-	const FPLHitWindowBlockSettings& BlockSettings, const FPLHitWindowDodgeSettings& DodgeSettings,
-	const EPLHitWindowSuperArmorLevel RequiredSuperArmor,
-	const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply,
-	const TArray<FPLHitWindowGameplayCue>& GameplayCuesToExecute)
+	FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings)
 {
 	if (!NotifyState || !MeshComp) return false;
 
@@ -1078,40 +1306,33 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* Notify
 	if (!OwnerActor || MeshComp->GetOwner() != OwnerActor) return false;
 
 	const FObjectKey NotifyKey(NotifyState);
-	ActiveHitDetectionWindows.FindOrAdd(NotifyKey) = DebugSocketName;
+	ActiveHitDetectionWindows.FindOrAdd(NotifyKey) = TraceSocketName;
 
 	int32& ActiveWindowCount = ActiveHitDetectionWindowCounts.FindOrAdd(NotifyKey);
 	++ActiveWindowCount;
 	++ActiveHitDebugWindowDepth;
 
-	if (!DebugSocketName.IsNone() && !MeshComp->DoesSocketExist(DebugSocketName))
+	if (!TraceSocketName.IsNone() && !MeshComp->DoesSocketExist(TraceSocketName))
 	{
 		UE_LOG(LogPLCombatHitDetection, Warning,
 			TEXT("[%s] Socket %s was not found. Falling back to mesh location."),
 			*GetNameSafe(OwnerActor),
-			*DebugSocketName.ToString());
+			*TraceSocketName.ToString());
 	}
 
 	// Cache active window data used by tick sweeps.
 	ActiveHitDebugMesh = MeshComp;
-	ActiveHitDebugSocketName = DebugSocketName;
-	ActiveHitShapeSettings = HitShapeSettings;
-	ActiveHitStopSettings = HitStopSettings;
-	ActiveHitMovementSettings = MovementSettings;
-	ActiveHitRotationSettings = RotationSettings;
-	ActiveHitBlockSettings = BlockSettings;
-	ActiveHitDodgeSettings = DodgeSettings;
-	ActiveHitRequiredSuperArmor = RequiredSuperArmor;
-	ActiveGameplayEffectsToApply = GameplayEffectsToApply;
-	ActiveGameplayCuesToExecute = GameplayCuesToExecute;
+	ActiveHitDebugSocketName = TraceSocketName;
+	ActiveHitWindowSettings = HitWindowSettings;
 	HitActorsThisWindow.Reset();
 	bHasTriggeredHitStopThisWindow = false;
 
+	ApplyActivationTransformEffects();
 	ExecuteHitWindowGameplayCues(nullptr, nullptr, EPLHitWindowCueTriggerTiming::OnActivation);
 
 	// Run an initial overlap immediately in case the attack starts inside a target.
 	const FTransform InitialTransform = GetHitTraceWorldTransform(MeshComp,
-		DebugSocketName, HitShapeSettings);
+		TraceSocketName, HitWindowSettings.ShapeSettings);
 
 	RunHitDebugQuery(InitialTransform, InitialTransform, false);
 
@@ -1136,7 +1357,7 @@ void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifySt
 		const FTransform CurrentTransform = GetHitTraceWorldTransform(
 			ActiveHitDebugMesh,
 			ActiveHitDebugSocketName,
-			ActiveHitShapeSettings);
+			ActiveHitWindowSettings.ShapeSettings);
 
 		RunHitDebugQuery(PreviousHitDebugTransform, CurrentTransform, false);
 		PreviousHitDebugTransform = CurrentTransform;

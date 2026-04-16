@@ -26,39 +26,9 @@ private:
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection")
-	FName DebugSocketName = NAME_None;
+	FName TraceSocketName = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection", meta=(ShowOnlyInnerProperties))
-	FPLHitWindowShapeSettings HitShapeSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection",
 		meta=(ShowOnlyInnerProperties))
-	FPLHitStopSettings HitStopSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
-		meta=(ShowOnlyInnerProperties))
-	FPLHitWindowMovementSettings MovementSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Rotation",
-		meta=(ShowOnlyInnerProperties))
-	FPLHitWindowRotationSettings RotationSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Block",
-		meta=(ShowOnlyInnerProperties))
-	FPLHitWindowBlockSettings BlockSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Dodge",
-		meta=(ShowOnlyInnerProperties))
-	FPLHitWindowDodgeSettings DodgeSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Super Armor")
-	EPLHitWindowSuperArmorLevel RequiredSuperArmor = EPLHitWindowSuperArmorLevel::None;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
-		meta=(TitleProperty="GameplayEffectClass"))
-	TArray<FPLHitWindowGameplayEffect> GameplayEffectsToApply;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Gameplay Cues",
-		meta=(TitleProperty="CueTag"))
-	TArray<FPLHitWindowGameplayCue> GameplayCuesToExecute;
+	FPLHitWindowSettings HitWindowSettings;
 };

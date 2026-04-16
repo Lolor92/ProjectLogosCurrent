@@ -49,21 +49,16 @@ public:
 	void DeinitializeCombat();
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
 	bool IsBlockingActive() const;
+	bool IsParryingActive() const;
+	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
+	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
 
 	bool BeginHitDetectionWindow(
 		const UAnimNotifyState* NotifyState,
 		USkeletalMeshComponent* MeshComp,
-		FName DebugSocketName,
-		const FPLHitWindowShapeSettings& HitShapeSettings,
-		const FPLHitStopSettings& HitStopSettings,
-		const FPLHitWindowMovementSettings& MovementSettings,
-		const FPLHitWindowRotationSettings& RotationSettings,
-		const FPLHitWindowBlockSettings& BlockSettings,
-		const FPLHitWindowDodgeSettings& DodgeSettings,
-		EPLHitWindowSuperArmorLevel RequiredSuperArmor,
-		const TArray<FPLHitWindowGameplayEffect>& GameplayEffectsToApply,
-		const TArray<FPLHitWindowGameplayCue>& GameplayCuesToExecute);
+		FName TraceSocketName,
+		const FPLHitWindowSettings& HitWindowSettings);
 
 	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
 
@@ -91,6 +86,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Block")
 	FGameplayTag BlockingTag;
 
+	// Tag required on a defender for hits to be considered parrying.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Parry")
+	FGameplayTag ParryingTag;
+
 	// Tag required on a defender for hits to be considered dodgeable.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Dodge")
 	FGameplayTag DodgingTag;
@@ -106,27 +105,35 @@ protected:
 	FGameplayTag SuperArmorTag3;
 
 	// Applied when this component's owner lands a hit that gets blocked.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Block")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Block")
 	TSubclassOf<UGameplayEffect> AttackerBlockedEffectClass;
 
 	// Applied when this component's owner successfully blocks an incoming hit.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Block")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Block")
 	TSubclassOf<UGameplayEffect> DefenderBlockedEffectClass;
 
+	// Applied when this component's owner lands a hit that gets parried.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Parry")
+	TSubclassOf<UGameplayEffect> AttackerParriedEffectClass;
+
+	// Applied when this component's owner successfully parries an incoming hit.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Parry")
+	TSubclassOf<UGameplayEffect> DefenderParrySuccessEffectClass;
+
 	// Applied when this component's owner lands a hit that gets dodged.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Dodge")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Dodge")
 	TSubclassOf<UGameplayEffect> AttackerDodgedEffectClass;
 
 	// Applied when this component's owner successfully dodges an incoming hit.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Dodge")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Dodge")
 	TSubclassOf<UGameplayEffect> DefenderDodgedEffectClass;
 
 	// Applied when this component's owner lands a hit that is resisted by super armor.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Super Armor")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Super Armor")
 	TSubclassOf<UGameplayEffect> AttackerSuperArmoredEffectClass;
 
 	// Applied when this component's owner successfully resists a hit via super armor.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Effects|Super Armor")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Super Armor")
 	TSubclassOf<UGameplayEffect> DefenderSuperArmoredEffectClass;
 
 private:
@@ -197,9 +204,18 @@ private:
 		const FPLHitWindowShapeSettings& HitShapeSettings) const;
 
 	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
+	void ApplyActivationTransformEffects() const;
 	void ApplyHitWindowTransformEffects(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyHitWindowMovement(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyHitWindowRotation(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyHitWindowMovement(AActor* HitActor, EPLHitWindowTransformTriggerTiming InvocationTiming,
+		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyHitWindowRotation(AActor* HitActor, EPLHitWindowTransformTriggerTiming InvocationTiming,
+		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+	void ApplyMovementToActor(AActor* RecipientActor, AActor* ReferenceActor,
+		const FPLHitWindowMovementSettings& MovementSettings) const;
+	void ApplyRotationToActor(AActor* RecipientActor, AActor* ReferenceActor,
+		const FPLHitWindowRotationSettings& RotationSettings) const;
+	AActor* ResolveTransformReferenceActor(EPLHitWindowReferenceActorSource ReferenceSource, AActor* HitActor,
+		EPLHitWindowTransformTriggerTiming InvocationTiming) const;
 	void ExecuteHitWindowGameplayCues(AActor* HitActor, const FHitResult* HitResult, EPLHitWindowCueTriggerTiming TriggerTiming) const;
 	void ExecuteGameplayCueOnASC(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
 		const FPLHitWindowGameplayCue& Cue, const FHitResult* HitResult) const;
@@ -209,12 +225,16 @@ private:
 	USceneComponent* GetGameplayCueAttachComponent(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
 		const FPLHitWindowGameplayCue& Cue,const FHitResult* HitResult) const;
 	bool IsAttackBlocked(AActor* HitActor) const;
+	bool IsAttackParried(AActor* HitActor) const;
 	bool IsAttackDodged(AActor* HitActor) const;
 	bool HasRequiredSuperArmor(AActor* HitActor) const;
 	static bool IsWithinBlockAngle(const AActor* DefenderActor, const AActor* AttackerActor, float BlockAngleDegrees);
+	static bool DoesTransformTimingMatch(EPLHitWindowTransformTriggerTiming ConfiguredTiming,
+		EPLHitWindowTransformTriggerTiming InvocationTiming);
+	static UPL_CombatComponent* FindCombatComponent(AActor* Actor);
 	bool HasSuperArmorAtOrAbove(EPLHitWindowSuperArmorLevel RequiredSuperArmor) const;
 	void ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,
-		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
+		bool bWasBlocked, bool bWasParried, bool bWasDodged, bool bHasSuperArmor) const;
 	void ApplyGameplayEffectToActor(AActor* RecipientActor, const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
 		float EffectLevel, const FHitResult* HitResult) const;
 
@@ -229,14 +249,9 @@ private:
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisWindow;
 	int32 ActiveHitDebugWindowDepth = 0;
 
-	FPLHitWindowShapeSettings ActiveHitShapeSettings;
-	FPLHitStopSettings ActiveHitStopSettings;
-	FPLHitWindowMovementSettings ActiveHitMovementSettings;
-	FPLHitWindowRotationSettings ActiveHitRotationSettings;
-	FPLHitWindowBlockSettings ActiveHitBlockSettings;
-	FPLHitWindowDodgeSettings ActiveHitDodgeSettings;
-	EPLHitWindowSuperArmorLevel ActiveHitRequiredSuperArmor = EPLHitWindowSuperArmorLevel::None;
-	TArray<FPLHitWindowGameplayEffect> ActiveGameplayEffectsToApply;
-	TArray<FPLHitWindowGameplayCue> ActiveGameplayCuesToExecute;
+	FPLHitWindowSettings ActiveHitWindowSettings;
 	bool bHasTriggeredHitStopThisWindow = false;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AActor> LastCombatReferenceActor;
 };
