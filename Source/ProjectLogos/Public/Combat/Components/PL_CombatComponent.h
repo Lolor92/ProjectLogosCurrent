@@ -14,11 +14,12 @@
 
 class APL_BaseCharacter;
 class UAbilitySystemComponent;
-class UAnimInstance;
 class UGameplayEffect;
 class FBoolProperty;
 class UAnimNotifyState;
 class USkeletalMeshComponent;
+class FPLCombatTagReactionRuntime;
+class FPLCombatHitWindowRuntime;
 
 // Drives an AnimInstance bool from one or more gameplay tags.
 USTRUCT(BlueprintType)
@@ -39,9 +40,11 @@ UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTLOGOS_API UPL_CombatComponent : public UActorComponent
 {
 	GENERATED_BODY()
+	friend class FPLCombatHitWindowRuntime;
 
 public:
 	UPL_CombatComponent();
+	virtual ~UPL_CombatComponent() override;
 	
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -54,11 +57,8 @@ public:
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
 
-	bool BeginHitDetectionWindow(
-		const UAnimNotifyState* NotifyState,
-		USkeletalMeshComponent* MeshComp,
-		FName TraceSocketName,
-		const FPLHitWindowSettings& HitWindowSettings);
+	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
+		FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings);
 
 	void EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp);
 
@@ -146,19 +146,6 @@ private:
 	void ClearCrowdControlTagEvent();
 	void OnCrowdControlTagChanged(const FGameplayTag Tag, int32 NewCount);
 
-	// Tag reactions.
-	void BindTagReactionEvents();
-	void ClearTagReactionEvents();
-	void OnReactionTagChanged(const FGameplayTag Tag, int32 NewCount);
-	void CacheAnimBoolBindings();
-	void SetAnimBool(const FPL_AnimBoolBinding& Binding, bool bValue) const;
-	bool IsAnimBoolActive(const FPL_AnimBoolBinding& Binding) const;
-	void QueueAbilityActivation(const FPL_TagReactionBinding& Binding, FGameplayTag TriggeredTag);
-	void QueueEffectApply(const FPL_TagReactionBinding& Binding, FGameplayTag TriggeredTag);
-	void QueueEffectRemove(const FPL_TagReactionBinding& Binding, FGameplayTag TriggeredTag);
-	FName GetRemoveTimerKey(const FPL_TagReactionBinding& Binding, const FGameplayTag& TriggeredTag) const;
-	void ExecuteDelayed(TFunction<void()> Function, float DelaySeconds, FTimerHandle& TimerHandle);
-
 	// Gameplay effects.
 	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass, float Level) const;
 
@@ -171,9 +158,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent = nullptr;
 
-	UPROPERTY()
-	TObjectPtr<UAnimInstance> AnimInstance = nullptr;
-
 	// Granted default abilities.
 	FPLAbilitySetGrantedHandles DefaultAbilityHandles;
 
@@ -181,77 +165,11 @@ private:
 	FGameplayTag BoundCrowdControlTag;
 	FDelegateHandle CrowdControlTagDelegateHandle;
 
-	// Tag reaction timers and delegates.
-	TMap<FGameplayTag, FDelegateHandle> TagReactionDelegateHandles;
-	TMap<FGameplayTag, FTimerHandle> AbilityReactionTimers;
-	TMap<FGameplayTag, FTimerHandle> ApplyEffectReactionTimers;
-	TMap<FName, FTimerHandle> RemoveEffectReactionTimers;
-
 	// Airborne effect state.
 	FActiveGameplayEffectHandle AirborneEffectHandle;
 	bool bAirborneEffectApplied = false;
 
-	// Active notify windows.
-	TMap<FObjectKey, FName> ActiveHitDetectionWindows;
-	TMap<FObjectKey, int32> ActiveHitDetectionWindowCounts;
-
-	// Hit detection.
-	void RunHitDebugQuery(const FTransform& StartTransform, const FTransform& EndTransform, bool bDrawDebug);
-	void DebugSweepActiveHitWindow();
-	void ResetActiveHitDebugWindow();
-
-	FTransform GetHitTraceWorldTransform(USkeletalMeshComponent* MeshComp, FName SocketName, 
-		const FPLHitWindowShapeSettings& HitShapeSettings) const;
-
-	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
-	void ApplyActivationTransformEffects() const;
-	void ApplyHitWindowTransformEffects(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyHitWindowMovement(AActor* HitActor, EPLHitWindowTransformTriggerTiming InvocationTiming,
-		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyHitWindowRotation(AActor* HitActor, EPLHitWindowTransformTriggerTiming InvocationTiming,
-		bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyMovementToActor(AActor* RecipientActor, AActor* ReferenceActor,
-		const FPLHitWindowMovementSettings& MovementSettings) const;
-	void ApplyRotationToActor(AActor* RecipientActor, AActor* ReferenceActor,
-		const FPLHitWindowRotationSettings& RotationSettings) const;
-	AActor* ResolveTransformReferenceActor(EPLHitWindowReferenceActorSource ReferenceSource, AActor* HitActor,
-		EPLHitWindowTransformTriggerTiming InvocationTiming) const;
-	void ExecuteHitWindowGameplayCues(AActor* HitActor, const FHitResult* HitResult, EPLHitWindowCueTriggerTiming TriggerTiming) const;
-	void ExecuteGameplayCueOnASC(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
-		const FPLHitWindowGameplayCue& Cue, const FHitResult* HitResult) const;
-	void ExecuteLocalCameraShakeCue(const FPLHitWindowGameplayCue& Cue, const FHitResult* HitResult) const;
-	bool ShouldExecuteLocalCameraShakeCue() const;
-	FVector GetGameplayCueSpawnLocation(const FPLHitWindowGameplayCue& Cue,const FHitResult* HitResult) const;
-	USceneComponent* GetGameplayCueAttachComponent(UAbilitySystemComponent* ASC, UAbilitySystemComponent* TargetASC,
-		const FPLHitWindowGameplayCue& Cue,const FHitResult* HitResult) const;
-	bool IsAttackBlocked(AActor* HitActor) const;
-	bool IsAttackParried(AActor* HitActor) const;
-	bool IsAttackDodged(AActor* HitActor) const;
-	bool HasRequiredSuperArmor(AActor* HitActor) const;
-	static bool IsWithinBlockAngle(const AActor* DefenderActor, const AActor* AttackerActor, float BlockAngleDegrees);
-	static bool DoesTransformTimingMatch(EPLHitWindowTransformTriggerTiming ConfiguredTiming,
-		EPLHitWindowTransformTriggerTiming InvocationTiming);
-	static UPL_CombatComponent* FindCombatComponent(AActor* Actor);
+	FPLCombatTagReactionRuntime* TagReactionRuntime = nullptr;
 	bool HasSuperArmorAtOrAbove(EPLHitWindowSuperArmorLevel RequiredSuperArmor) const;
-	void ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,
-		bool bWasBlocked, bool bWasParried, bool bWasDodged, bool bHasSuperArmor) const;
-	void ApplyGameplayEffectToActor(AActor* RecipientActor, const TSubclassOf<UGameplayEffect>& GameplayEffectClass,
-		float EffectLevel, const FHitResult* HitResult) const;
-
-	// Active hit window state.
-	UPROPERTY(Transient)
-	TObjectPtr<USkeletalMeshComponent> ActiveHitDebugMesh = nullptr;
-
-	FName ActiveHitDebugSocketName = NAME_None;
-	FTransform PreviousHitDebugTransform = FTransform::Identity;
-	bool bHitDebugWindowActive = false;
-	bool bHasPreviousHitDebugLocation = false;
-	TSet<TWeakObjectPtr<AActor>> HitActorsThisWindow;
-	int32 ActiveHitDebugWindowDepth = 0;
-
-	FPLHitWindowSettings ActiveHitWindowSettings;
-	bool bHasTriggeredHitStopThisWindow = false;
-
-	UPROPERTY(Transient)
-	TWeakObjectPtr<AActor> LastCombatReferenceActor;
+	FPLCombatHitWindowRuntime* HitWindowRuntime = nullptr;
 };
