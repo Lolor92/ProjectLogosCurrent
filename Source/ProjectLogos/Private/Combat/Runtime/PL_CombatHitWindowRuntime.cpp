@@ -6,6 +6,7 @@
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Components/PL_CombatComponent.h"
+#include "Combat/Runtime/PL_LocalHitFeedbackRuntime.h"
 #include "Combat/Utilities/PL_CombatFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
@@ -245,16 +246,22 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	if (!CombatComponent.AbilitySystemComponent || !HitActor || HitActor == CombatComponent.GetOwner()) return;
 
 	const bool bIsAuthority = CombatComponent.GetOwner() && CombatComponent.GetOwner()->HasAuthority();
-	const bool bWasBlocked = bIsAuthority && IsAttackBlocked(HitActor);
+	if (!bIsAuthority)
+	{
+		CombatComponent.GetLocalHitFeedbackRuntime().PlayPredictedHitFeedback(
+			HitActor,
+			HitResult,
+			ActiveHitWindowSettings);
+		return;
+	}
+
+	const bool bWasBlocked = IsAttackBlocked(HitActor);
 	const bool bWasParried = bWasBlocked && IsAttackParried(HitActor);
-	const bool bWasDodged = bIsAuthority && IsAttackDodged(HitActor);
-	const bool bHasSuperArmor = bIsAuthority && HasRequiredSuperArmor(HitActor);
+	const bool bWasDodged = IsAttackDodged(HitActor);
+	const bool bHasSuperArmor = HasRequiredSuperArmor(HitActor);
 	const bool bHasDefenseOutcome = bWasBlocked || bWasParried || bWasDodged || bHasSuperArmor;
 
-	if (bIsAuthority)
-	{
-		ApplyHitWindowTransformEffects(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
-	}
+	ApplyHitWindowTransformEffects(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
 
 	if (bHasDefenseOutcome)
 	{
@@ -272,7 +279,7 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 		return;
 	}
 
-	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty() && bIsAuthority)
+	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty())
 	{
 		if (UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor))
 		{

@@ -7,6 +7,8 @@
 #include "Combat/Data/PL_HitWindowTypes.h"
 #include "Combat/Data/PL_AbilitySet.h"
 #include "Combat/Data/PL_TagReactionData.h"
+#include "Combat/Runtime/PL_CombatHitWindowRuntime.h"
+#include "Combat/Runtime/PL_LocalHitFeedbackRuntime.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
@@ -19,7 +21,6 @@ class FBoolProperty;
 class UAnimNotifyState;
 class USkeletalMeshComponent;
 class FPLCombatTagReactionRuntime;
-class FPLCombatHitWindowRuntime;
 
 // Drives an AnimInstance bool from one or more gameplay tags.
 USTRUCT(BlueprintType)
@@ -43,6 +44,7 @@ class PROJECTLOGOS_API UPL_CombatComponent : public UActorComponent
 	friend class FPLCombatHitWindowRuntime;
 
 public:
+	UPL_CombatComponent(FVTableHelper& Helper);
 	UPL_CombatComponent();
 	virtual ~UPL_CombatComponent() override;
 	
@@ -56,6 +58,9 @@ public:
 	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
+	APL_BaseCharacter* GetOwningCharacter() const { return OwningCharacter; }
+	UAbilitySystemComponent* GetAbilitySystemComponent() const { return AbilitySystemComponent; }
+	FPLLocalHitFeedbackRuntime& GetLocalHitFeedbackRuntime() { return LocalHitFeedbackRuntime; }
 
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
 		FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings);
@@ -171,5 +176,6 @@ private:
 
 	FPLCombatTagReactionRuntime* TagReactionRuntime = nullptr;
 	bool HasSuperArmorAtOrAbove(EPLHitWindowSuperArmorLevel RequiredSuperArmor) const;
-	FPLCombatHitWindowRuntime* HitWindowRuntime = nullptr;
+	FPLCombatHitWindowRuntime HitWindowRuntime;
+	FPLLocalHitFeedbackRuntime LocalHitFeedbackRuntime;
 };

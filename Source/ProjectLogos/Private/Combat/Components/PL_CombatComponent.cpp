@@ -11,21 +11,29 @@
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
 
-UPL_CombatComponent::UPL_CombatComponent()
+UPL_CombatComponent::UPL_CombatComponent(FVTableHelper& Helper)
+	: Super(Helper)
+	, HitWindowRuntime(*this)
+	, LocalHitFeedbackRuntime(*this)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	SetComponentTickEnabled(false);
 	TagReactionRuntime = new FPLCombatTagReactionRuntime(*this);
-	HitWindowRuntime = new FPLCombatHitWindowRuntime(*this);
+}
+
+UPL_CombatComponent::UPL_CombatComponent()
+	: HitWindowRuntime(*this)
+	, LocalHitFeedbackRuntime(*this)
+{
+	PrimaryComponentTick.bCanEverTick = true;
+	SetComponentTickEnabled(false);
+	TagReactionRuntime = new FPLCombatTagReactionRuntime(*this);
 }
 
 UPL_CombatComponent::~UPL_CombatComponent()
 {
 	delete TagReactionRuntime;
 	TagReactionRuntime = nullptr;
-
-	delete HitWindowRuntime;
-	HitWindowRuntime = nullptr;
 }
 
 void UPL_CombatComponent::InitializeCombat(
@@ -45,7 +53,7 @@ void UPL_CombatComponent::InitializeCombat(
 void UPL_CombatComponent::DeinitializeCombat()
 {
 	if (TagReactionRuntime) TagReactionRuntime->Deinitialize();
-	if (HitWindowRuntime) HitWindowRuntime->Deinitialize();
+	HitWindowRuntime.Deinitialize();
 
 	ClearCrowdControlTagEvent();
 	RemoveGameplayEffect(AirborneEffectHandle);
@@ -95,7 +103,7 @@ bool UPL_CombatComponent::IsParryingActive() const
 
 void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
 {
-	if (HitWindowRuntime) HitWindowRuntime->SetLastCombatReferenceActor(InActor);
+	HitWindowRuntime.SetLastCombatReferenceActor(InActor);
 }
 
 bool UPL_CombatComponent::HasSuperArmorAtOrAbove(const EPLHitWindowSuperArmorLevel RequiredSuperArmor) const
@@ -211,17 +219,16 @@ void UPL_CombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (HitWindowRuntime) HitWindowRuntime->Tick();
+	HitWindowRuntime.Tick();
 }
 
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState,
 	USkeletalMeshComponent* MeshComp, FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings)
 {
-	return HitWindowRuntime
-		&& HitWindowRuntime->BeginHitDetectionWindow(NotifyState, MeshComp, TraceSocketName, HitWindowSettings);
+	return HitWindowRuntime.BeginHitDetectionWindow(NotifyState, MeshComp, TraceSocketName, HitWindowSettings);
 }
 
 void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp)
 {
-	if (HitWindowRuntime) HitWindowRuntime->EndHitDetectionWindow(NotifyState, MeshComp);
+	HitWindowRuntime.EndHitDetectionWindow(NotifyState, MeshComp);
 }
