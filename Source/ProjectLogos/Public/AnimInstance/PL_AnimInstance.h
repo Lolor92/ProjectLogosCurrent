@@ -53,6 +53,7 @@ public:
 private:
 	// Ability montage state.
 	void UpdateAbilityAnimReplication();
+	void SuppressDuplicatePredictedReactionMontage();
 	bool GetAbilityPercentMontagePlayed(float& OutPercent, UPL_GameplayAbility*& OutAbility);
 	UAbilitySystemComponent* GetAbilitySystemComponentSafe();
 

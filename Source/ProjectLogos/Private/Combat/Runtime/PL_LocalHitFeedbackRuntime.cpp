@@ -93,6 +93,12 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 		if (TargetAnimInstance->Montage_IsPlaying(MontageToPlay)) return;
 
 		const float MontageLength = TargetAnimInstance->Montage_Play(MontageToPlay, 1.f);
+		if (MontageLength <= 0.f) return;
+
+		if (UPL_CombatComponent* TargetCombatComponent = TargetCharacter->GetCombatComponent())
+		{
+			TargetCombatComponent->GetLocalHitFeedbackRuntime().RegisterPredictedReactionMontage(MontageToPlay);
+		}
 
 		UE_LOG(LogTemp, Warning,
 			TEXT("Predicted reaction montage played. Attacker=%s Target=%s GE=%s TriggerTag=%s Montage=%s Length=%.3f"),
@@ -105,6 +111,97 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 
 		return;
 	}
+}
+
+void FPLLocalHitFeedbackRuntime::RegisterPredictedReactionMontage(UAnimMontage* Montage)
+{
+	if (!Montage) return;
+
+	const UWorld* World = CombatComponent.GetWorld();
+	if (!World) return;
+
+	const float Now = World->GetTimeSeconds();
+
+	RecentPredictedReactionMontages.RemoveAll(
+		[Montage](const FPLPredictedReactionMontageEntry& Entry)
+		{
+			return Entry.Montage.Get() == Montage;
+		});
+
+	FPLPredictedReactionMontageEntry& Entry = RecentPredictedReactionMontages.AddDefaulted_GetRef();
+	Entry.Montage = Montage;
+	Entry.TimeSeconds = Now;
+
+	UE_LOG(LogTemp, Warning, TEXT("Registered predicted reaction montage receipt. Owner=%s Montage=%s Time=%.3f"),
+		*GetNameSafe(CombatComponent.GetOwner()),
+		*GetNameSafe(Montage),
+		Now);
+}
+
+bool FPLLocalHitFeedbackRuntime::TryCorrectPredictedReactionMontage(
+	const UAnimMontage* Montage,
+	const float CurrentPositionSeconds,
+	float& OutCorrectedPositionSeconds,
+	bool& bOutShouldStop)
+{
+	OutCorrectedPositionSeconds = 0.f;
+	bOutShouldStop = false;
+
+	if (!Montage) return false;
+
+	const UWorld* World = CombatComponent.GetWorld();
+	if (!World) return false;
+
+	PruneOldReactionMontageEntries();
+
+	const float Now = World->GetTimeSeconds();
+	const float MontageLength = Montage->GetPlayLength();
+
+	for (const FPLPredictedReactionMontageEntry& Entry : RecentPredictedReactionMontages)
+	{
+		if (Entry.Montage.Get() != Montage) continue;
+
+		const float ElapsedSincePredictedPlaySeconds = Now - Entry.TimeSeconds;
+		if (ElapsedSincePredictedPlaySeconds <= 0.f) return false;
+
+		// This is probably the original predicted montage still playing normally.
+		if (CurrentPositionSeconds + PredictedReactionCorrectionTolerance >= ElapsedSincePredictedPlaySeconds)
+		{
+			return false;
+		}
+
+		// Server replay arrived after the predicted montage should already be done.
+		if (MontageLength <= 0.f || ElapsedSincePredictedPlaySeconds >= MontageLength)
+		{
+			bOutShouldStop = true;
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("Predicted reaction duplicate should stop. Owner=%s Montage=%s Current=%.3f Elapsed=%.3f Length=%.3f"),
+				*GetNameSafe(CombatComponent.GetOwner()),
+				*GetNameSafe(Montage),
+				CurrentPositionSeconds,
+				ElapsedSincePredictedPlaySeconds,
+				MontageLength);
+
+			return true;
+		}
+
+		OutCorrectedPositionSeconds = FMath::Clamp(
+			ElapsedSincePredictedPlaySeconds,
+			0.f,
+			MontageLength);
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("Predicted reaction correction found. Owner=%s Montage=%s Current=%.3f Corrected=%.3f"),
+			*GetNameSafe(CombatComponent.GetOwner()),
+			*GetNameSafe(Montage),
+			CurrentPositionSeconds,
+			OutCorrectedPositionSeconds);
+
+		return true;
+	}
+
+	return false;
 }
 
 bool FPLLocalHitFeedbackRuntime::FindTriggerTagFromGameplayEffectClass(
@@ -141,6 +238,20 @@ bool FPLLocalHitFeedbackRuntime::FindTriggerTagFromGameplayEffectClass(
 	return false;
 }
 
+void FPLLocalHitFeedbackRuntime::PruneOldReactionMontageEntries()
+{
+	const UWorld* World = CombatComponent.GetWorld();
+	if (!World) return;
+
+	const float Now = World->GetTimeSeconds();
+
+	RecentPredictedReactionMontages.RemoveAll(
+		[this, Now](const FPLPredictedReactionMontageEntry& Entry)
+		{
+			return !Entry.Montage.IsValid() || Now - Entry.TimeSeconds > PredictedReactionCorrectionTime;
+		});
+}
+
 bool FPLLocalHitFeedbackRuntime::WasRecentlyPredictedHit(AActor* HitActor) const
 {
 	if (!HitActor) return false;
@@ -172,6 +283,8 @@ void FPLLocalHitFeedbackRuntime::PruneOldEntries()
 	{
 		return !Entry.TargetActor.IsValid() || Now - Entry.TimeSeconds > DuplicateSuppressionTime;
 	});
+
+	PruneOldReactionMontageEntries();
 }
 
 void FPLLocalHitFeedbackRuntime::ExecuteLocalCameraShakeCue(const FPLHitWindowGameplayCue& Cue,

@@ -3,6 +3,7 @@
 #include "Animation/AnimMontage.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Component/PL_CharacterMovementComponent.h"
+#include "Combat/Components/PL_CombatComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GAS/Ability/PL_GameplayAbility.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -46,6 +47,8 @@ void UPL_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		MovementOffsetYaw = 0.f;
 	}
 
+	SuppressDuplicatePredictedReactionMontage();
+
 	// The owning client publishes ability-driven anim state for everyone else.
 	UpdateAbilityAnimReplication();
 
@@ -60,6 +63,49 @@ void UPL_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 	Character->bUseControllerRotationYaw = bAllowControllerYaw;
 	bUseControllerRotationYaw = bAllowControllerYaw;
+}
+
+void UPL_AnimInstance::SuppressDuplicatePredictedReactionMontage()
+{
+	if (!Character || Character->HasAuthority()) return;
+
+	UPL_CombatComponent* CombatComponent = Character->GetCombatComponent();
+	if (!CombatComponent) return;
+
+	UAnimMontage* ActiveMontage = GetCurrentActiveMontage();
+	if (!ActiveMontage) return;
+
+	const float CurrentPositionSeconds = Montage_GetPosition(ActiveMontage);
+
+	float CorrectedPositionSeconds = 0.f;
+	bool bShouldStop = false;
+
+	if (!CombatComponent->GetLocalHitFeedbackRuntime().TryCorrectPredictedReactionMontage(
+		ActiveMontage,
+		CurrentPositionSeconds,
+		CorrectedPositionSeconds,
+		bShouldStop))
+	{
+		return;
+	}
+
+	if (bShouldStop)
+	{
+		Montage_Stop(0.f, ActiveMontage);
+
+		UE_LOG(LogTemp, Warning, TEXT("Stopped duplicate predicted reaction montage. Character=%s Montage=%s"),
+			*GetNameSafe(Character),
+			*GetNameSafe(ActiveMontage));
+
+		return;
+	}
+
+	Montage_SetPosition(ActiveMontage, CorrectedPositionSeconds);
+
+	UE_LOG(LogTemp, Warning, TEXT("Corrected duplicate predicted reaction montage. Character=%s Montage=%s Position=%.3f"),
+		*GetNameSafe(Character),
+		*GetNameSafe(ActiveMontage),
+		CorrectedPositionSeconds);
 }
 
 void UPL_AnimInstance::UpdateAbilityAnimReplication()
