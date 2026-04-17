@@ -150,7 +150,13 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 	ProxyMesh->SetComponentTickEnabled(true);
 
 	// Local-only visual swap.
+	// Keep the hidden real mesh fully animated so swap-back does not reveal a stale pose.
 	const bool bRealMeshWasHidden = RealMesh->bHiddenInGame;
+	const bool bRealMeshWasTickEnabled = RealMesh->IsComponentTickEnabled();
+	const EVisibilityBasedAnimTickOption PreviousRealMeshTickOption = RealMesh->VisibilityBasedAnimTickOption;
+
+	RealMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	RealMesh->SetComponentTickEnabled(true);
 	RealMesh->SetHiddenInGame(true, true);
 
 	UAnimInstance* ProxyAnimInstance = ProxyMesh->GetAnimInstance();
@@ -179,7 +185,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 	FOnMontageBlendingOutStarted BlendOutDelegate;
 	BlendOutDelegate.BindLambda(
-		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
+		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
 		{
 			if (Montage != MontageToPlay) return;
 
@@ -208,6 +214,8 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 			if (!World || World->bIsTearingDown)
 			{
 				RealMeshPtr->SetHiddenInGame(bRealMeshWasHidden, true);
+				RealMeshPtr->VisibilityBasedAnimTickOption = PreviousRealMeshTickOption;
+				RealMeshPtr->SetComponentTickEnabled(bRealMeshWasTickEnabled);
 
 				if (ProxyMeshPtr)
 				{
@@ -221,10 +229,12 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 			const float MaxHoldTime = 3.0f;
 
 			TSharedRef<FTimerHandle> PollHandle = MakeShared<FTimerHandle>();
+			TSharedRef<float> ServerReactionFinishedTime = MakeShared<float>(-1.f);
+			const float PostServerReactionSettleTime = 0.08f;
 
 			World->GetTimerManager().SetTimer(
 				*PollHandle,
-				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle]()
+				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle, ServerReactionFinishedTime, PostServerReactionSettleTime]()
 				{
 					USkeletalMeshComponent* RealMesh = WeakRealMesh.Get();
 					USkeletalMeshComponent* ProxyMesh = WeakProxyMesh.Get();
@@ -243,6 +253,8 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 					if (!World || World->bIsTearingDown)
 					{
 						RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+						RealMesh->VisibilityBasedAnimTickOption = PreviousRealMeshTickOption;
+						RealMesh->SetComponentTickEnabled(bRealMeshWasTickEnabled);
 
 						if (ProxyMesh)
 						{
@@ -285,12 +297,28 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 					if (bRealMeshStillPlayingServerReaction && !bTimedOut)
 					{
+						*ServerReactionFinishedTime = -1.f;
+						return;
+					}
+
+					const float Now = World->GetTimeSeconds();
+
+					if (*ServerReactionFinishedTime < 0.f)
+					{
+						*ServerReactionFinishedTime = Now;
+						return;
+					}
+
+					if (Now - *ServerReactionFinishedTime < PostServerReactionSettleTime && !bTimedOut)
+					{
 						return;
 					}
 
 					World->GetTimerManager().ClearTimer(*PollHandle);
 
 					RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+					RealMesh->VisibilityBasedAnimTickOption = PreviousRealMeshTickOption;
+					RealMesh->SetComponentTickEnabled(bRealMeshWasTickEnabled);
 
 					if (ProxyMesh)
 					{
