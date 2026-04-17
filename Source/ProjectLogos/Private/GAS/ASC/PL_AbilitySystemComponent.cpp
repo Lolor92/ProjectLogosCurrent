@@ -21,9 +21,18 @@ float UPL_AbilitySystemComponent::PlayMontage(
 	FName StartSectionName,
 	float StartTimeSeconds)
 {
+	UE_LOG(LogTemp, Warning,
+		TEXT("ASC PlayMontage called. Avatar=%s HasAuthority=%s IsLocallyControlled=%s Ability=%s Montage=%s"),
+		*GetNameSafe(GetAvatarActor_Direct()),
+		GetAvatarActor_Direct() && GetAvatarActor_Direct()->HasAuthority() ? TEXT("TRUE") : TEXT("FALSE"),
+		Cast<APawn>(GetAvatarActor_Direct()) && Cast<APawn>(GetAvatarActor_Direct())->IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"),
+		*GetNameSafe(AnimatingAbility),
+		*GetNameSafe(Montage));
+
 	if (ShouldSuppressPredictedReactionMontageReplay(Montage))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ASC suppressed duplicate predicted reaction montage replay from PlayMontage. Avatar=%s Montage=%s"),
+		UE_LOG(LogTemp, Warning,
+			TEXT("ASC suppressed duplicate predicted reaction montage replay from PlayMontage. Avatar=%s Montage=%s"),
 			*GetNameSafe(GetAvatarActor_Direct()),
 			*GetNameSafe(Montage));
 
@@ -43,9 +52,17 @@ void UPL_AbilitySystemComponent::OnRep_ReplicatedAnimMontage()
 {
 	UAnimMontage* ReplicatedMontage = RepAnimMontageInfo.GetAnimMontage();
 
+	UE_LOG(LogTemp, Warning,
+		TEXT("ASC OnRep_ReplicatedAnimMontage called. Avatar=%s HasAuthority=%s IsLocallyControlled=%s Montage=%s"),
+		*GetNameSafe(GetAvatarActor_Direct()),
+		GetAvatarActor_Direct() && GetAvatarActor_Direct()->HasAuthority() ? TEXT("TRUE") : TEXT("FALSE"),
+		Cast<APawn>(GetAvatarActor_Direct()) && Cast<APawn>(GetAvatarActor_Direct())->IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"),
+		*GetNameSafe(ReplicatedMontage));
+
 	if (ShouldSuppressPredictedReactionMontageReplay(ReplicatedMontage))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ASC suppressed duplicate replicated reaction montage from OnRep. Avatar=%s Montage=%s"),
+		UE_LOG(LogTemp, Warning,
+			TEXT("ASC suppressed duplicate replicated reaction montage from OnRep. Avatar=%s Montage=%s"),
 			*GetNameSafe(GetAvatarActor_Direct()),
 			*GetNameSafe(ReplicatedMontage));
 
@@ -57,24 +74,62 @@ void UPL_AbilitySystemComponent::OnRep_ReplicatedAnimMontage()
 
 bool UPL_AbilitySystemComponent::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage) const
 {
-	if (!Montage) return false;
+	if (!Montage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: Montage is null."));
+		return false;
+	}
 
 	AActor* AvatarActorInstance = GetAvatarActor_Direct();
-	if (!AvatarActorInstance) return false;
+	if (!AvatarActorInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: AvatarActor is null. Montage=%s"),
+			*GetNameSafe(Montage));
+		return false;
+	}
 
-	// Never suppress on the server.
-	if (AvatarActorInstance->HasAuthority()) return false;
+	if (AvatarActorInstance->HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: Avatar has authority. Avatar=%s Montage=%s"),
+			*GetNameSafe(AvatarActorInstance),
+			*GetNameSafe(Montage));
+		return false;
+	}
 
-	// Never suppress the local player's own ability montages.
-	// This suppression is only for remote target copies on the attacking client.
 	const APawn* AvatarPawn = Cast<APawn>(AvatarActorInstance);
-	if (AvatarPawn && AvatarPawn->IsLocallyControlled()) return false;
+	if (AvatarPawn && AvatarPawn->IsLocallyControlled())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: Avatar is locally controlled. Avatar=%s Montage=%s"),
+			*GetNameSafe(AvatarActorInstance),
+			*GetNameSafe(Montage));
+		return false;
+	}
 
 	APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(AvatarActorInstance);
-	if (!Character) return false;
+	if (!Character)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: Avatar is not APL_BaseCharacter. Avatar=%s Montage=%s"),
+			*GetNameSafe(AvatarActorInstance),
+			*GetNameSafe(Montage));
+		return false;
+	}
 
 	UPL_CombatComponent* CombatComponent = Character->GetCombatComponent();
-	if (!CombatComponent) return false;
+	if (!CombatComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Suppress check failed: CombatComponent is null. Avatar=%s Montage=%s"),
+			*GetNameSafe(AvatarActorInstance),
+			*GetNameSafe(Montage));
+		return false;
+	}
 
-	return CombatComponent->GetLocalHitFeedbackRuntime().ShouldSuppressPredictedReactionMontageReplay(Montage);
+	const bool bShouldSuppress = CombatComponent->GetLocalHitFeedbackRuntime()
+		.ShouldSuppressPredictedReactionMontageReplay(Montage);
+
+	UE_LOG(LogTemp, Warning, TEXT("Suppress check result. Avatar=%s Montage=%s Result=%s"),
+		*GetNameSafe(AvatarActorInstance),
+		*GetNameSafe(Montage),
+		bShouldSuppress ? TEXT("TRUE") : TEXT("FALSE"));
+
+	return bShouldSuppress;
 }
