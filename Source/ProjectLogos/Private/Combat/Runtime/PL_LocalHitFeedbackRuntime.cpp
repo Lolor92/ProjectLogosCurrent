@@ -34,8 +34,9 @@ namespace
 	{
 		if (!Mesh) return;
 
-		Mesh->TickAnimation(0.f, false);
-		Mesh->RefreshBoneTransforms();
+		// Do not call TickAnimation() or RefreshBoneTransforms() here.
+		// This helper can run from montage delegates / timers, and forcing skeletal
+		// evaluation there can recurse into PostAnimEvaluation and crash.
 		Mesh->UpdateComponentToWorld();
 		Mesh->MarkRenderTransformDirty();
 		Mesh->MarkRenderDynamicDataDirty();
@@ -371,38 +372,57 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 	TWeakObjectPtr<USkeletalMeshComponent> WeakRealMesh = RealMesh;
 	TWeakObjectPtr<USkeletalMeshComponent> WeakProxyMesh = ProxyMesh;
+	TSharedRef<bool> bHasLastProxyRootMotionAnchor = MakeShared<bool>(false);
+	TSharedRef<FVector> LastProxyRootMotionAnchorWorldLocation = MakeShared<FVector>(FVector::ZeroVector);
+	TSharedRef<FTimerHandle> AnchorCaptureHandle = MakeShared<FTimerHandle>();
+
+	World->GetTimerManager().SetTimer(
+		*AnchorCaptureHandle,
+		[WeakProxyMesh, bHasLastProxyRootMotionAnchor, LastProxyRootMotionAnchorWorldLocation]()
+		{
+			USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get();
+
+			if (!ProxyMeshPtr) return;
+
+			FVector AnchorLocation = FVector::ZeroVector;
+
+			if (GetProxyRootMotionAnchorLocation(ProxyMeshPtr, AnchorLocation))
+			{
+				*bHasLastProxyRootMotionAnchor = true;
+				*LastProxyRootMotionAnchorWorldLocation = AnchorLocation;
+			}
+		},
+		1.f / 60.f,
+		true);
 
 	FOnMontageBlendingOutStarted BlendOutDelegate;
 	BlendOutDelegate.BindLambda(
-		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
+		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay, AnchorCaptureHandle, bHasLastProxyRootMotionAnchor, LastProxyRootMotionAnchorWorldLocation](UAnimMontage* Montage, bool bInterrupted)
 		{
 			if (Montage != MontageToPlay) return;
 
 			USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get();
-
-			bool bHasProxyRootMotionAnchor = false;
-			FVector ProxyRootMotionAnchorWorldLocation = FVector::ZeroVector;
-
 			if (ProxyMeshPtr)
 			{
+				if (UWorld* ProxyWorld = ProxyMeshPtr->GetWorld())
+				{
+					ProxyWorld->GetTimerManager().ClearTimer(*AnchorCaptureHandle);
+				}
+
 				// Keep the proxy alive and ticking after the predicted montage finishes.
-				// This avoids the visible statue/freeze while waiting for the hidden real mesh
-				// to finish the server-confirmed reaction.
+				// Do not force-refresh bones here. This delegate may run during animation evaluation.
 				ProxyMeshPtr->bPauseAnims = false;
 				ProxyMeshPtr->SetComponentTickEnabled(true);
-
-				RefreshMeshVisualPose(ProxyMeshPtr);
-
-				bHasProxyRootMotionAnchor = GetProxyRootMotionAnchorLocation(
-					ProxyMeshPtr,
-					ProxyRootMotionAnchorWorldLocation);
-
-				UE_LOG(LogTemp, Warning,
-					TEXT("Captured predicted proxy root-motion anchor. Proxy=%s HasAnchor=%s Anchor=%s"),
-					*GetNameSafe(ProxyMeshPtr),
-					bHasProxyRootMotionAnchor ? TEXT("TRUE") : TEXT("FALSE"),
-					*ProxyRootMotionAnchorWorldLocation.ToString());
 			}
+
+			const bool bHasProxyRootMotionAnchor = *bHasLastProxyRootMotionAnchor;
+			const FVector ProxyRootMotionAnchorWorldLocation = *LastProxyRootMotionAnchorWorldLocation;
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("Using cached predicted proxy root-motion anchor. Proxy=%s HasAnchor=%s Anchor=%s"),
+				*GetNameSafe(ProxyMeshPtr),
+				bHasProxyRootMotionAnchor ? TEXT("TRUE") : TEXT("FALSE"),
+				*ProxyRootMotionAnchorWorldLocation.ToString());
 
 			USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get();
 			if (!RealMeshPtr)
