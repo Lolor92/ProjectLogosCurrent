@@ -131,7 +131,23 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 	}
 
 	ProxyMesh->RegisterComponentWithWorld(World);
-	ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+
+	if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
+	{
+		ProxyMesh->AttachToComponent(
+			RealAttachParent,
+			FAttachmentTransformRules::KeepRelativeTransform,
+			RealMesh->GetAttachSocketName());
+
+		ProxyMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
+	}
+	else
+	{
+		ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+	}
+
+	ProxyMesh->bPauseAnims = false;
+	ProxyMesh->SetComponentTickEnabled(true);
 
 	// Local-only visual swap.
 	const bool bRealMeshWasHidden = RealMesh->bHiddenInGame;
@@ -170,9 +186,11 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 			USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get();
 			if (ProxyMeshPtr)
 			{
-				// Freeze the proxy at its final predicted pose instead of destroying it immediately.
-				ProxyMeshPtr->bPauseAnims = true;
-				ProxyMeshPtr->SetComponentTickEnabled(false);
+				// Keep the proxy alive and ticking after the predicted montage finishes.
+				// This avoids the visible statue/freeze while waiting for the hidden real mesh
+				// to finish the server-confirmed reaction.
+				ProxyMeshPtr->bPauseAnims = false;
+				ProxyMeshPtr->SetComponentTickEnabled(true);
 			}
 
 			USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get();
@@ -232,6 +250,29 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 						}
 
 						return;
+					}
+
+					if (ProxyMesh)
+					{
+						if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
+						{
+							if (ProxyMesh->GetAttachParent() != RealAttachParent)
+							{
+								ProxyMesh->AttachToComponent(
+									RealAttachParent,
+									FAttachmentTransformRules::KeepWorldTransform,
+									RealMesh->GetAttachSocketName());
+							}
+
+							ProxyMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
+						}
+						else
+						{
+							ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+						}
+
+						ProxyMesh->bPauseAnims = false;
+						ProxyMesh->SetComponentTickEnabled(true);
 					}
 
 					UAnimInstance* RealAnimInstance = RealMesh->GetAnimInstance();
