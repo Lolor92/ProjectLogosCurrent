@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "PL_TagReactionData.generated.h"
 
+class UAnimMontage;
 class UGameplayEffect;
 
 UENUM(BlueprintType)
@@ -24,6 +25,9 @@ struct FPL_TagReactionAbility
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ability")
 	FGameplayTag AbilityTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction")
+	TObjectPtr<UAnimMontage> PredictedReactionMontage = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ability", meta=(ClampMin="0.0", UIMin="0.0", Units="Seconds"))
 	float DelaySeconds = 0.f;

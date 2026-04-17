@@ -64,6 +64,7 @@ public:
 	UAbilitySystemComponent* GetAbilitySystemComponent() const { return AbilitySystemComponent; }
 	UPL_TagReactionData* GetTagReactionData() const { return TagReactionData; }
 	FPLLocalHitFeedbackRuntime& GetLocalHitFeedbackRuntime() { return LocalHitFeedbackRuntime; }
+	const FPL_TagReactionBinding* FindTagReactionBindingForTriggerTag(const FGameplayTag& TriggerTag) const;
 	bool FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const;
 
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,

@@ -136,6 +136,21 @@ void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
 	HitWindowRuntime.SetLastCombatReferenceActor(InActor);
 }
 
+const FPL_TagReactionBinding* UPL_CombatComponent::FindTagReactionBindingForTriggerTag(const FGameplayTag& TriggerTag) const
+{
+	if (!TagReactionData || !TriggerTag.IsValid()) return nullptr;
+
+	for (const FPL_TagReactionBinding& Reaction : TagReactionData->Reactions)
+	{
+		if (!Reaction.TriggerTag.IsValid()) continue;
+		if (!TriggerTag.MatchesTag(Reaction.TriggerTag)) continue;
+
+		return &Reaction;
+	}
+
+	return nullptr;
+}
+
 bool UPL_CombatComponent::FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const
 {
 	OutAbilityTag = FGameplayTag();
