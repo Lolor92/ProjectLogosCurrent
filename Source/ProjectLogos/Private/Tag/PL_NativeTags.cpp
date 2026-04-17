@@ -10,6 +10,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Knockback, "Ability.Knockback");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Knockdown, "Ability.Knockdown");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Pushback, "Ability.Pushback");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Stagger, "Ability.Stagger");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Stagger_Cosmetic, "Ability.Stagger.Cosmetic");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Ability_Test, "Ability.Test");
 
 // Inventory containers.

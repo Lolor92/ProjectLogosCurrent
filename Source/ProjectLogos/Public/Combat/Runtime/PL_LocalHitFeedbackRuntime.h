@@ -62,6 +62,6 @@ private:
 
 	float DuplicateSuppressionTime = 0.35f;
 
-	// Long enough for knockdown/pushback plus bad ping.
-	float PredictedReactionReplaySuppressionTime = 2.5f;
+	// Covers your knockdown/pushback/stagger plus ping/replication delay.
+	float PredictedReactionReplaySuppressionTime = 3.0f;
 };

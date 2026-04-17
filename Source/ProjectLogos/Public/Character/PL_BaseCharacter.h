@@ -84,11 +84,13 @@ public:
 	UPL_CombatComponent* GetCombatComponent() const { return CombatComponent; }
 	
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
+	
+	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass, float Level = 1.f) const;
 
 protected:
 	// Character setup.
 	virtual void InitializeDefaultAttributes();
-	FActiveGameplayEffectHandle ApplyEffectToSelf(const TSubclassOf<UGameplayEffect>& GameplayEffectClass, float Level = 1.f) const;
+	
 	
 	// Replicated state.
 	UPROPERTY(ReplicatedUsing=OnRep_AbilityAnimState)

@@ -249,9 +249,8 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	if (!bIsAuthority)
 	{
 		CombatComponent.GetLocalHitFeedbackRuntime().PlayPredictedHitFeedback(
-			HitActor,
-			HitResult,
-			ActiveHitWindowSettings);
+			HitActor, HitResult, ActiveHitWindowSettings);
+		
 		return;
 	}
 
@@ -279,7 +278,7 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 		return;
 	}
 
-	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty())
+	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty() && bIsAuthority)
 	{
 		if (UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor))
 		{

@@ -2,7 +2,6 @@
 
 #include "GAS/ASC/PL_AbilitySystemComponent.h"
 
-#include "Abilities/GameplayAbility.h"
 #include "Animation/AnimMontage.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Components/PL_CombatComponent.h"
@@ -13,30 +12,20 @@ UPL_AbilitySystemComponent::UPL_AbilitySystemComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
-float UPL_AbilitySystemComponent::PlayMontage(
-	UGameplayAbility* AnimatingAbility,
-	FGameplayAbilityActivationInfo ActivationInfo,
-	UAnimMontage* Montage,
-	float InPlayRate,
-	FName StartSectionName,
-	float StartTimeSeconds)
+void UPL_AbilitySystemComponent::OnRep_ReplicatedAnimMontage()
 {
-	if (ShouldSuppressPredictedReactionMontageReplay(Montage))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("ASC suppressed duplicate predicted reaction montage replay. Avatar=%s Montage=%s"),
-			*GetNameSafe(GetAvatarActor_Direct()),
-			*GetNameSafe(Montage));
+	UAnimMontage* ReplicatedMontage = RepAnimMontageInfo.GetAnimMontage();
 
-		return Montage ? Montage->GetPlayLength() : 0.f;
+	if (ShouldSuppressPredictedReactionMontageReplay(ReplicatedMontage))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ASC suppressed replicated duplicate reaction montage. Avatar=%s Montage=%s"),
+			*GetNameSafe(GetAvatarActor_Direct()),
+			*GetNameSafe(ReplicatedMontage));
+
+		return;
 	}
 
-	return Super::PlayMontage(
-		AnimatingAbility,
-		ActivationInfo,
-		Montage,
-		InPlayRate,
-		StartSectionName,
-		StartTimeSeconds);
+	Super::OnRep_ReplicatedAnimMontage();
 }
 
 bool UPL_AbilitySystemComponent::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage) const
@@ -49,7 +38,8 @@ bool UPL_AbilitySystemComponent::ShouldSuppressPredictedReactionMontageReplay(co
 	// Never suppress on the server. Server must remain authoritative.
 	if (AvatarActorInstance->HasAuthority()) return false;
 
-	// Never suppress the local player's own ability montages.
+	// Never suppress the locally controlled character's own GAS montage.
+	// We only want this for remote target copies on the attacking client.
 	const APawn* AvatarPawn = Cast<APawn>(AvatarActorInstance);
 	if (AvatarPawn && AvatarPawn->IsLocallyControlled()) return false;
 
