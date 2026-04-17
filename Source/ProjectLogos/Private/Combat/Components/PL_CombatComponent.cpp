@@ -103,6 +103,32 @@ bool UPL_CombatComponent::IsParryingActive() const
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ParryingTag);
 }
 
+bool UPL_CombatComponent::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage)
+{
+	AActor* OwnerActor = GetOwner();
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("CombatComponent suppress check. Owner=%s HasAuthority=%s IsLocallyControlled=%s Montage=%s"),
+		*GetNameSafe(OwnerActor),
+		OwnerActor && OwnerActor->HasAuthority() ? TEXT("TRUE") : TEXT("FALSE"),
+		OwningCharacter && OwningCharacter->IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"),
+		*GetNameSafe(Montage));
+
+	if (!Montage || !OwnerActor) return false;
+	if (OwnerActor->HasAuthority()) return false;
+	if (OwningCharacter && OwningCharacter->IsLocallyControlled()) return false;
+
+	const bool bShouldSuppress = LocalHitFeedbackRuntime.ShouldSuppressPredictedReactionMontageReplay(Montage);
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("CombatComponent suppress result. Owner=%s Montage=%s Result=%s"),
+		*GetNameSafe(OwnerActor),
+		*GetNameSafe(Montage),
+		bShouldSuppress ? TEXT("TRUE") : TEXT("FALSE"));
+
+	return bShouldSuppress;
+}
+
 void UPL_CombatComponent::PlayPredictedHitReaction(const FHitResult& HitResult)
 {
 	AActor* HitActor = HitResult.GetActor();

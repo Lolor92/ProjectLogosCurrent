@@ -66,6 +66,8 @@ public:
 	FPLLocalHitFeedbackRuntime& GetLocalHitFeedbackRuntime() { return LocalHitFeedbackRuntime; }
 	const FPL_TagReactionBinding* FindTagReactionBindingForTriggerTag(const FGameplayTag& TriggerTag) const;
 	bool FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const;
+	UFUNCTION(BlueprintCallable, Category="Combat|Prediction")
+	bool ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage);
 
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
 		FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings);
