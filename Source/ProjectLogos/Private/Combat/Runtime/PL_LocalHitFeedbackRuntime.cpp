@@ -71,12 +71,6 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 	APL_BaseCharacter* TargetCharacter = Cast<APL_BaseCharacter>(HitActor);
 	if (!TargetCharacter) return;
 
-	USkeletalMeshComponent* TargetMesh = TargetCharacter->GetMesh();
-	if (!TargetMesh) return;
-
-	UAnimInstance* TargetAnimInstance = TargetMesh->GetAnimInstance();
-	if (!TargetAnimInstance) return;
-
 	for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : HitWindowSettings.GameplayEffectsToApply)
 	{
 		if (!GameplayEffectToApply.GameplayEffectClass) continue;
@@ -90,59 +84,113 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 		UAnimMontage* MontageToPlay = ReactionBinding->Ability.PredictedReactionMontage;
 		if (!MontageToPlay) continue;
 
-		if (TargetAnimInstance->Montage_IsPlaying(MontageToPlay)) return;
-
-		const ERootMotionMode::Type PreviousRootMotionMode = TargetAnimInstance->RootMotionMode;
-
-		// Keep root motion visually inside the pose, but do not let this local-only prediction
-		// move the simulated target capsule. Server movement remains authoritative.
-		TargetAnimInstance->SetRootMotionMode(ERootMotionMode::NoRootMotionExtraction);
-
-		const float MontageLength = TargetAnimInstance->Montage_Play(MontageToPlay, 1.f);
-
-		if (MontageLength <= 0.f)
-		{
-			TargetAnimInstance->SetRootMotionMode(PreviousRootMotionMode);
-			return;
-		}
-
-		TWeakObjectPtr<UAnimInstance> WeakAnimInstance = TargetAnimInstance;
-
-		FOnMontageBlendingOutStarted RestoreRootMotionModeDelegate;
-		RestoreRootMotionModeDelegate.BindLambda(
-			[WeakAnimInstance, PreviousRootMotionMode, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
-			{
-				if (Montage != MontageToPlay) return;
-
-				UAnimInstance* AnimInstance = WeakAnimInstance.Get();
-				if (!AnimInstance) return;
-
-				AnimInstance->SetRootMotionMode(PreviousRootMotionMode);
-
-				UE_LOG(LogTemp, Warning,
-					TEXT("Restored predicted reaction root motion mode. Montage=%s Interrupted=%s"),
-					*GetNameSafe(Montage),
-					bInterrupted ? TEXT("TRUE") : TEXT("FALSE"));
-			});
-
-		TargetAnimInstance->Montage_SetBlendingOutDelegate(RestoreRootMotionModeDelegate, MontageToPlay);
-
-		if (UPL_CombatComponent* TargetCombatComponent = TargetCharacter->GetCombatComponent())
-		{
-			TargetCombatComponent->GetLocalHitFeedbackRuntime().RegisterPredictedReactionMontage(MontageToPlay);
-		}
+		if (!PlayPredictedReactionProxyMontage(TargetCharacter, MontageToPlay)) return;
 
 		UE_LOG(LogTemp, Warning,
-			TEXT("Predicted reaction montage played. Attacker=%s Target=%s GE=%s TriggerTag=%s Montage=%s Length=%.3f"),
+			TEXT("Predicted reaction montage played. Attacker=%s Target=%s GE=%s TriggerTag=%s Montage=%s"),
 			*GetNameSafe(OwnerCharacter),
 			*GetNameSafe(TargetCharacter),
 			*GetNameSafe(GameplayEffectToApply.GameplayEffectClass),
 			*TriggerTag.ToString(),
-			*GetNameSafe(MontageToPlay),
-			MontageLength);
+			*GetNameSafe(MontageToPlay));
 
 		return;
 	}
+}
+
+bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
+	APL_BaseCharacter* TargetCharacter,
+	UAnimMontage* MontageToPlay) const
+{
+	if (!TargetCharacter || !MontageToPlay) return false;
+
+	USkeletalMeshComponent* RealMesh = TargetCharacter->GetMesh();
+	if (!RealMesh || !RealMesh->GetSkeletalMeshAsset()) return false;
+
+	UWorld* World = TargetCharacter->GetWorld();
+	if (!World || World->bIsTearingDown) return false;
+
+	// Do not create another proxy if one is already hidden/playing from this same local prediction window.
+	UAnimInstance* RealAnimInstance = RealMesh->GetAnimInstance();
+	if (RealAnimInstance && RealAnimInstance->Montage_IsPlaying(MontageToPlay)) return false;
+
+	USkeletalMeshComponent* ProxyMesh = NewObject<USkeletalMeshComponent>(TargetCharacter);
+	if (!ProxyMesh) return false;
+
+	ProxyMesh->SetSkeletalMesh(RealMesh->GetSkeletalMeshAsset());
+	ProxyMesh->SetAnimInstanceClass(RealMesh->GetAnimClass());
+	ProxyMesh->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+	ProxyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ProxyMesh->SetGenerateOverlapEvents(false);
+	ProxyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+	for (int32 MaterialIndex = 0; MaterialIndex < RealMesh->GetNumMaterials(); ++MaterialIndex)
+	{
+		ProxyMesh->SetMaterial(MaterialIndex, RealMesh->GetMaterial(MaterialIndex));
+	}
+
+	ProxyMesh->RegisterComponentWithWorld(World);
+	ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+
+	// Local-only visual swap.
+	const bool bRealMeshWasHidden = RealMesh->bHiddenInGame;
+	RealMesh->SetHiddenInGame(true, true);
+
+	UAnimInstance* ProxyAnimInstance = ProxyMesh->GetAnimInstance();
+	if (!ProxyAnimInstance)
+	{
+		RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+		ProxyMesh->DestroyComponent();
+		return false;
+	}
+
+	// Important:
+	// This keeps root motion visible in the proxy pose without letting this local-only prediction
+	// drive the replicated NPC capsule/movement.
+	ProxyAnimInstance->SetRootMotionMode(ERootMotionMode::NoRootMotionExtraction);
+
+	const float MontageLength = ProxyAnimInstance->Montage_Play(MontageToPlay, 1.f);
+	if (MontageLength <= 0.f)
+	{
+		RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+		ProxyMesh->DestroyComponent();
+		return false;
+	}
+
+	TWeakObjectPtr<USkeletalMeshComponent> WeakRealMesh = RealMesh;
+	TWeakObjectPtr<USkeletalMeshComponent> WeakProxyMesh = ProxyMesh;
+
+	FOnMontageBlendingOutStarted BlendOutDelegate;
+	BlendOutDelegate.BindLambda(
+		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
+		{
+			if (Montage != MontageToPlay) return;
+
+			if (USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get())
+			{
+				RealMeshPtr->SetHiddenInGame(bRealMeshWasHidden, true);
+			}
+
+			if (USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get())
+			{
+				ProxyMeshPtr->DestroyComponent();
+			}
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("Predicted reaction proxy finished. Montage=%s Interrupted=%s"),
+				*GetNameSafe(Montage),
+				bInterrupted ? TEXT("TRUE") : TEXT("FALSE"));
+		});
+
+	ProxyAnimInstance->Montage_SetBlendingOutDelegate(BlendOutDelegate, MontageToPlay);
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Predicted reaction proxy montage started. Target=%s Montage=%s Length=%.3f"),
+		*GetNameSafe(TargetCharacter),
+		*GetNameSafe(MontageToPlay),
+		MontageLength);
+
+	return true;
 }
 
 void FPLLocalHitFeedbackRuntime::RegisterPredictedReactionMontage(UAnimMontage* Montage)

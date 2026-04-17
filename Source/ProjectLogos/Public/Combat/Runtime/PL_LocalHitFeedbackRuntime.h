@@ -6,6 +6,7 @@
 #include "Combat/Data/PL_HitWindowTypes.h"
 
 class AActor;
+class APL_BaseCharacter;
 class UAnimMontage;
 class UGameplayEffect;
 class UPL_CombatComponent;
@@ -44,6 +45,10 @@ public:
 
 private:
 	void PlayPredictedReactionMontage(AActor* HitActor, const FPLHitWindowSettings& HitWindowSettings) const;
+
+	bool PlayPredictedReactionProxyMontage(
+		APL_BaseCharacter* TargetCharacter,
+		UAnimMontage* MontageToPlay) const;
 
 	bool FindTriggerTagFromGameplayEffectClass(
 		TSubclassOf<UGameplayEffect> GameplayEffectClass,
