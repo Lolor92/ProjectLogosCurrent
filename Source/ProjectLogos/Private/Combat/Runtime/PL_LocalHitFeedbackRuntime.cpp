@@ -41,6 +41,26 @@ namespace
 		Mesh->MarkRenderDynamicDataDirty();
 	}
 
+	void AnchorProxyMeshInWorld(
+		USkeletalMeshComponent* ProxyMesh,
+		const USkeletalMeshComponent* SourceMesh)
+	{
+		if (!ProxyMesh || !SourceMesh) return;
+
+		ProxyMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+		ProxyMesh->SetAbsolute(true, true, true);
+
+		ProxyMesh->SetWorldTransform(
+			SourceMesh->GetComponentTransform(),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+
+		ProxyMesh->UpdateComponentToWorld();
+		ProxyMesh->MarkRenderTransformDirty();
+		ProxyMesh->MarkRenderDynamicDataDirty();
+	}
+
 	FTransform BlendWorldTransform(
 		const FTransform& StartTransform,
 		const FTransform& TargetTransform,
@@ -65,30 +85,6 @@ namespace
 			SmoothAlpha);
 
 		return FTransform(Rotation, Location, Scale);
-	}
-
-	void MatchProxyAttachmentToRealMesh(
-		USkeletalMeshComponent* ProxyMesh,
-		const USkeletalMeshComponent* RealMesh)
-	{
-		if (!ProxyMesh || !RealMesh) return;
-
-		USceneComponent* RealAttachParent = RealMesh->GetAttachParent();
-
-		if (!RealAttachParent)
-		{
-			return;
-		}
-
-		if (ProxyMesh->GetAttachParent() == RealAttachParent)
-		{
-			return;
-		}
-
-		ProxyMesh->AttachToComponent(
-			RealAttachParent,
-			FAttachmentTransformRules::KeepWorldTransform,
-			RealMesh->GetAttachSocketName());
 	}
 
 	void RevealRealMeshAndDestroyProxyNextFrame(
@@ -259,20 +255,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 	}
 
 	ProxyMesh->RegisterComponentWithWorld(World);
-
-	if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
-	{
-		ProxyMesh->AttachToComponent(
-			RealAttachParent,
-			FAttachmentTransformRules::KeepRelativeTransform,
-			RealMesh->GetAttachSocketName());
-
-		ProxyMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
-	}
-	else
-	{
-		ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
-	}
+	AnchorProxyMeshInWorld(ProxyMesh, RealMesh);
 
 	ProxyMesh->bPauseAnims = false;
 	ProxyMesh->SetComponentTickEnabled(true);
@@ -406,8 +389,6 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 					if (ProxyMesh)
 					{
-						MatchProxyAttachmentToRealMesh(ProxyMesh, RealMesh);
-
 						ProxyMesh->bPauseAnims = false;
 						ProxyMesh->SetComponentTickEnabled(true);
 					}
