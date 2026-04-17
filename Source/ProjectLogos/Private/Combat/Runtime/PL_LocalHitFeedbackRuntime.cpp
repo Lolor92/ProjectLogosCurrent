@@ -41,6 +41,76 @@ namespace
 		Mesh->MarkRenderDynamicDataDirty();
 	}
 
+	FName GetProxyRootMotionAnchorBone(const USkeletalMeshComponent* ProxyMesh)
+	{
+		if (!ProxyMesh) return NAME_None;
+
+		const FName RootBoneName = ProxyMesh->GetBoneName(0);
+
+		if (RootBoneName != NAME_None)
+		{
+			return RootBoneName;
+		}
+
+		static const FName PelvisBoneName(TEXT("pelvis"));
+
+		if (ProxyMesh->GetBoneIndex(PelvisBoneName) != INDEX_NONE)
+		{
+			return PelvisBoneName;
+		}
+
+		return NAME_None;
+	}
+
+	bool GetProxyRootMotionAnchorLocation(
+		const USkeletalMeshComponent* ProxyMesh,
+		FVector& OutAnchorLocation)
+	{
+		if (!ProxyMesh) return false;
+
+		const FName AnchorBone = GetProxyRootMotionAnchorBone(ProxyMesh);
+
+		if (AnchorBone == NAME_None) return false;
+
+		OutAnchorLocation = ProxyMesh->GetSocketLocation(AnchorBone);
+		return true;
+	}
+
+	void BakeProxyRootMotionOffsetIntoComponent(
+		USkeletalMeshComponent* ProxyMesh,
+		const FVector& DesiredAnchorWorldLocation)
+	{
+		if (!ProxyMesh) return;
+
+		RefreshMeshVisualPose(ProxyMesh);
+
+		FVector CurrentAnchorWorldLocation = FVector::ZeroVector;
+
+		if (!GetProxyRootMotionAnchorLocation(ProxyMesh, CurrentAnchorWorldLocation))
+		{
+			return;
+		}
+
+		FVector Correction = DesiredAnchorWorldLocation - CurrentAnchorWorldLocation;
+
+		// For hit reactions/pushback, keep the correction horizontal.
+		// This avoids weird vertical foot/root popping.
+		Correction.Z = 0.f;
+
+		if (Correction.SizeSquared() <= 0.01f)
+		{
+			return;
+		}
+
+		ProxyMesh->AddWorldOffset(
+			Correction,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+
+		RefreshMeshVisualPose(ProxyMesh);
+	}
+
 	void AnchorProxyMeshInWorld(
 		USkeletalMeshComponent* ProxyMesh,
 		const USkeletalMeshComponent* SourceMesh)
@@ -309,6 +379,10 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 			if (Montage != MontageToPlay) return;
 
 			USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get();
+
+			bool bHasProxyRootMotionAnchor = false;
+			FVector ProxyRootMotionAnchorWorldLocation = FVector::ZeroVector;
+
 			if (ProxyMeshPtr)
 			{
 				// Keep the proxy alive and ticking after the predicted montage finishes.
@@ -316,6 +390,18 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 				// to finish the server-confirmed reaction.
 				ProxyMeshPtr->bPauseAnims = false;
 				ProxyMeshPtr->SetComponentTickEnabled(true);
+
+				RefreshMeshVisualPose(ProxyMeshPtr);
+
+				bHasProxyRootMotionAnchor = GetProxyRootMotionAnchorLocation(
+					ProxyMeshPtr,
+					ProxyRootMotionAnchorWorldLocation);
+
+				UE_LOG(LogTemp, Warning,
+					TEXT("Captured predicted proxy root-motion anchor. Proxy=%s HasAnchor=%s Anchor=%s"),
+					*GetNameSafe(ProxyMeshPtr),
+					bHasProxyRootMotionAnchor ? TEXT("TRUE") : TEXT("FALSE"),
+					*ProxyRootMotionAnchorWorldLocation.ToString());
 			}
 
 			USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get();
@@ -357,7 +443,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 			World->GetTimerManager().SetTimer(
 				*PollHandle,
-				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle, ServerReactionFinishedTime, PostServerReactionSettleTime, bHandoffStarted, HandoffStartTime, HandoffProxyStartWorldTransform, HandoffBlendTime]()
+				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle, ServerReactionFinishedTime, PostServerReactionSettleTime, bHandoffStarted, HandoffStartTime, HandoffProxyStartWorldTransform, HandoffBlendTime, bHasProxyRootMotionAnchor, ProxyRootMotionAnchorWorldLocation]()
 				{
 					USkeletalMeshComponent* RealMesh = WeakRealMesh.Get();
 					USkeletalMeshComponent* ProxyMesh = WeakProxyMesh.Get();
@@ -391,6 +477,13 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 					{
 						ProxyMesh->bPauseAnims = false;
 						ProxyMesh->SetComponentTickEnabled(true);
+
+						if (bHasProxyRootMotionAnchor)
+						{
+							BakeProxyRootMotionOffsetIntoComponent(
+								ProxyMesh,
+								ProxyRootMotionAnchorWorldLocation);
+						}
 					}
 
 					UAnimInstance* RealAnimInstance = RealMesh->GetAnimInstance();
@@ -474,7 +567,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 						*GetNameSafe(MontageToPlay),
 						bTimedOut ? TEXT("TRUE") : TEXT("FALSE"));
 				},
-				0.03f,
+				1.f / 60.f,
 				true);
 		});
 
