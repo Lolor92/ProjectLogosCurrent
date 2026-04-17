@@ -13,6 +13,7 @@
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
 #include "Tag/PL_NativeTags.h"
+#include "TimerManager.h"
 
 FPLLocalHitFeedbackRuntime::FPLLocalHitFeedbackRuntime(UPL_CombatComponent& InCombatComponent)
 	: CombatComponent(InCombatComponent)
@@ -166,20 +167,103 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 		{
 			if (Montage != MontageToPlay) return;
 
-			if (USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get())
+			USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get();
+			if (ProxyMeshPtr)
+			{
+				// Freeze the proxy at its final predicted pose instead of destroying it immediately.
+				ProxyMeshPtr->bPauseAnims = true;
+				ProxyMeshPtr->SetComponentTickEnabled(false);
+			}
+
+			USkeletalMeshComponent* RealMeshPtr = WeakRealMesh.Get();
+			if (!RealMeshPtr)
+			{
+				if (ProxyMeshPtr)
+				{
+					ProxyMeshPtr->DestroyComponent();
+				}
+
+				return;
+			}
+
+			UWorld* World = RealMeshPtr->GetWorld();
+			if (!World || World->bIsTearingDown)
 			{
 				RealMeshPtr->SetHiddenInGame(bRealMeshWasHidden, true);
+
+				if (ProxyMeshPtr)
+				{
+					ProxyMeshPtr->DestroyComponent();
+				}
+
+				return;
 			}
 
-			if (USkeletalMeshComponent* ProxyMeshPtr = WeakProxyMesh.Get())
-			{
-				ProxyMeshPtr->DestroyComponent();
-			}
+			const float ProxyFinishedTime = World->GetTimeSeconds();
+			const float MaxHoldTime = 3.0f;
 
-			UE_LOG(LogTemp, Warning,
-				TEXT("Predicted reaction proxy finished. Montage=%s Interrupted=%s"),
-				*GetNameSafe(Montage),
-				bInterrupted ? TEXT("TRUE") : TEXT("FALSE"));
+			TSharedRef<FTimerHandle> PollHandle = MakeShared<FTimerHandle>();
+
+			World->GetTimerManager().SetTimer(
+				*PollHandle,
+				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle]()
+				{
+					USkeletalMeshComponent* RealMesh = WeakRealMesh.Get();
+					USkeletalMeshComponent* ProxyMesh = WeakProxyMesh.Get();
+
+					if (!RealMesh)
+					{
+						if (ProxyMesh)
+						{
+							ProxyMesh->DestroyComponent();
+						}
+
+						return;
+					}
+
+					UWorld* World = RealMesh->GetWorld();
+					if (!World || World->bIsTearingDown)
+					{
+						RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+
+						if (ProxyMesh)
+						{
+							ProxyMesh->DestroyComponent();
+						}
+
+						return;
+					}
+
+					UAnimInstance* RealAnimInstance = RealMesh->GetAnimInstance();
+
+					const bool bRealMeshStillPlayingServerReaction =
+						RealAnimInstance && RealAnimInstance->Montage_IsPlaying(MontageToPlay);
+
+					const float ElapsedSinceProxyFinished = World->GetTimeSeconds() - ProxyFinishedTime;
+					const bool bTimedOut = ElapsedSinceProxyFinished >= MaxHoldTime;
+
+					if (bRealMeshStillPlayingServerReaction && !bTimedOut)
+					{
+						return;
+					}
+
+					World->GetTimerManager().ClearTimer(*PollHandle);
+
+					RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+
+					if (ProxyMesh)
+					{
+						ProxyMesh->DestroyComponent();
+					}
+
+					UE_LOG(LogTemp, Warning,
+						TEXT("Predicted reaction proxy swapped back. RealMesh=%s Montage=%s TimedOut=%s"),
+						*GetNameSafe(RealMesh),
+						*GetNameSafe(MontageToPlay),
+						bTimedOut ? TEXT("TRUE") : TEXT("FALSE"));
+				},
+				0.03f,
+				true);
 		});
 
 	ProxyAnimInstance->Montage_SetBlendingOutDelegate(BlendOutDelegate, MontageToPlay);
