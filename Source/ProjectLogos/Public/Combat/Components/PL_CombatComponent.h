@@ -16,6 +16,7 @@
 
 class APL_BaseCharacter;
 class UAbilitySystemComponent;
+class UAnimMontage;
 class UGameplayEffect;
 class FBoolProperty;
 class UAnimNotifyState;
@@ -55,12 +56,15 @@ public:
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
 	bool IsBlockingActive() const;
 	bool IsParryingActive() const;
+	void PlayPredictedHitReaction(const FHitResult& HitResult);
 	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
 	APL_BaseCharacter* GetOwningCharacter() const { return OwningCharacter; }
 	UAbilitySystemComponent* GetAbilitySystemComponent() const { return AbilitySystemComponent; }
+	UPL_TagReactionData* GetTagReactionData() const { return TagReactionData; }
 	FPLLocalHitFeedbackRuntime& GetLocalHitFeedbackRuntime() { return LocalHitFeedbackRuntime; }
+	bool FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const;
 
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
 		FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings);

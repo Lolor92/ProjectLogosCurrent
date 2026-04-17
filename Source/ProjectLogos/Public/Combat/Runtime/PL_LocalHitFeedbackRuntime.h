@@ -6,6 +6,9 @@
 #include "Combat/Data/PL_HitWindowTypes.h"
 
 class AActor;
+class UAbilitySystemComponent;
+class UAnimMontage;
+class UGameplayEffect;
 class UPL_CombatComponent;
 struct FHitResult;
 
@@ -30,6 +33,9 @@ public:
 	void PruneOldEntries();
 
 private:
+	void PlayPredictedReactionMontage(AActor* HitActor, const FPLHitWindowSettings& HitWindowSettings) const;
+	bool FindTriggerTagFromGameplayEffect(TSubclassOf<UGameplayEffect> GameplayEffectClass, FGameplayTag& OutTriggerTag) const;
+	UAnimMontage* FindMontageFromAbilityTag(UAbilitySystemComponent* ASC, const FGameplayTag& AbilityTag) const;
 	void ExecuteLocalCameraShakeCue(const FPLHitWindowGameplayCue& Cue, const FHitResult& HitResult) const;
 	bool ShouldExecuteLocalCameraShakeCue() const;
 	FVector GetCueSpawnLocation(const FPLHitWindowGameplayCue& Cue, const FHitResult& HitResult) const;

@@ -2,6 +2,7 @@
 
 #include "Combat/Components/PL_CombatComponent.h"
 #include "AbilitySystemComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Runtime/PL_CombatHitWindowRuntime.h"
@@ -10,6 +11,7 @@
 #include "GameFramework/Controller.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
+#include "Tag/PL_NativeTags.h"
 
 UPL_CombatComponent::UPL_CombatComponent(FVTableHelper& Helper)
 	: Super(Helper)
@@ -101,9 +103,56 @@ bool UPL_CombatComponent::IsParryingActive() const
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ParryingTag);
 }
 
+void UPL_CombatComponent::PlayPredictedHitReaction(const FHitResult& HitResult)
+{
+	AActor* HitActor = HitResult.GetActor();
+	UE_LOG(LogTemp, Warning, TEXT("HitActor: %s"), *GetNameSafe(HitActor));
+
+	APL_BaseCharacter* TargetCharacter = Cast<APL_BaseCharacter>(HitActor);
+
+	if (TargetCharacter->HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Stop: Server should not play predicted local reaction."));
+		return;
+	}
+
+	USkeletalMeshComponent* TargetMesh = TargetCharacter->GetMesh();
+	if (!TargetMesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Stop: TargetMesh is null."));
+		return;
+	}
+
+	UAnimInstance* TargetAnimInstance = TargetMesh->GetAnimInstance();
+	if (!TargetAnimInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Stop: TargetAnimInstance is null."));
+		return;
+	}
+}
+
 void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
 {
 	HitWindowRuntime.SetLastCombatReferenceActor(InActor);
+}
+
+bool UPL_CombatComponent::FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const
+{
+	OutAbilityTag = FGameplayTag();
+
+	if (!TagReactionData || !TriggerTag.IsValid()) return false;
+
+	for (const FPL_TagReactionBinding& Reaction : TagReactionData->Reactions)
+	{
+		if (!Reaction.TriggerTag.IsValid()) continue;
+		if (!TriggerTag.MatchesTag(Reaction.TriggerTag)) continue;
+		if (!Reaction.Ability.AbilityTag.IsValid()) continue;
+
+		OutAbilityTag = Reaction.Ability.AbilityTag;
+		return true;
+	}
+
+	return false;
 }
 
 bool UPL_CombatComponent::HasSuperArmorAtOrAbove(const EPLHitWindowSuperArmorLevel RequiredSuperArmor) const
