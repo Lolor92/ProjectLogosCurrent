@@ -8,12 +8,219 @@
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Components/PL_CombatComponent.h"
 #include "Combat/Data/PL_TagReactionData.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
 #include "Tag/PL_NativeTags.h"
 #include "TimerManager.h"
+
+namespace
+{
+	void RestoreRealMeshAfterProxySwap(
+		USkeletalMeshComponent* RealMesh,
+		const bool bRealMeshWasHidden,
+		const bool bRealMeshWasTickEnabled,
+		const EVisibilityBasedAnimTickOption PreviousRealMeshTickOption)
+	{
+		if (!RealMesh) return;
+
+		RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
+		RealMesh->VisibilityBasedAnimTickOption = PreviousRealMeshTickOption;
+		RealMesh->SetComponentTickEnabled(bRealMeshWasTickEnabled);
+	}
+
+	void CopyMaterialsFromMesh(USkinnedMeshComponent* SourceMesh, USkinnedMeshComponent* TargetMesh)
+	{
+		if (!SourceMesh || !TargetMesh) return;
+
+		for (int32 MaterialIndex = 0; MaterialIndex < SourceMesh->GetNumMaterials(); ++MaterialIndex)
+		{
+			TargetMesh->SetMaterial(MaterialIndex, SourceMesh->GetMaterial(MaterialIndex));
+		}
+	}
+
+	bool StartProxyToRealPoseBlend(
+		USkeletalMeshComponent* RealMesh,
+		USkeletalMeshComponent* ProxyMesh,
+		const bool bRealMeshWasHidden,
+		const bool bRealMeshWasTickEnabled,
+		const EVisibilityBasedAnimTickOption PreviousRealMeshTickOption,
+		const float BlendDuration = 0.10f)
+	{
+		if (!RealMesh || !ProxyMesh) return false;
+
+		UWorld* World = RealMesh->GetWorld();
+		if (!World || World->bIsTearingDown) return false;
+
+		USkeletalMesh* SkeletalMeshAsset = RealMesh->GetSkeletalMeshAsset();
+		if (!SkeletalMeshAsset) return false;
+
+		UPoseableMeshComponent* BlendMesh = NewObject<UPoseableMeshComponent>(RealMesh->GetOwner());
+		if (!BlendMesh) return false;
+
+		BlendMesh->SetSkeletalMesh(SkeletalMeshAsset);
+		BlendMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BlendMesh->SetGenerateOverlapEvents(false);
+		BlendMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+		CopyMaterialsFromMesh(RealMesh, BlendMesh);
+
+		BlendMesh->RegisterComponentWithWorld(World);
+
+		if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
+		{
+			BlendMesh->AttachToComponent(
+				RealAttachParent,
+				FAttachmentTransformRules::KeepRelativeTransform,
+				RealMesh->GetAttachSocketName());
+
+			BlendMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
+		}
+		else
+		{
+			BlendMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+		}
+
+		struct FBonePoseBlendData
+		{
+			FName BoneName = NAME_None;
+			FTransform StartTransform = FTransform::Identity;
+		};
+
+		TArray<FBonePoseBlendData> BoneBlendData;
+		BoneBlendData.Reserve(RealMesh->GetNumBones());
+
+		const FTransform BlendMeshWorldTransform = BlendMesh->GetComponentTransform();
+
+		for (int32 BoneIndex = 0; BoneIndex < RealMesh->GetNumBones(); ++BoneIndex)
+		{
+			const FName BoneName = RealMesh->GetBoneName(BoneIndex);
+			if (BoneName == NAME_None) continue;
+			if (ProxyMesh->GetBoneIndex(BoneName) == INDEX_NONE) continue;
+
+			const FTransform ProxyBoneWorldTransform = ProxyMesh->GetSocketTransform(BoneName, RTS_World);
+			const FTransform ProxyBoneComponentTransform =
+				ProxyBoneWorldTransform.GetRelativeTransform(BlendMeshWorldTransform);
+
+			FBonePoseBlendData& BlendData = BoneBlendData.AddDefaulted_GetRef();
+			BlendData.BoneName = BoneName;
+			BlendData.StartTransform = ProxyBoneComponentTransform;
+
+			BlendMesh->SetBoneTransformByName(
+				BoneName,
+				ProxyBoneComponentTransform,
+				EBoneSpaces::ComponentSpace);
+		}
+
+		// The blend mesh now visually matches the proxy, so we can remove the proxy without a pop.
+		ProxyMesh->DestroyComponent();
+
+		const float BlendStartTime = World->GetTimeSeconds();
+		TSharedRef<FTimerHandle> BlendTimerHandle = MakeShared<FTimerHandle>();
+
+		World->GetTimerManager().SetTimer(
+			*BlendTimerHandle,
+			[RealMesh, BlendMesh, BoneBlendData, BlendStartTime, BlendDuration,
+			 bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, BlendTimerHandle]()
+			{
+				if (!RealMesh || !BlendMesh)
+				{
+					return;
+				}
+
+				UWorld* World = RealMesh->GetWorld();
+				if (!World || World->bIsTearingDown)
+				{
+					RestoreRealMeshAfterProxySwap(
+						RealMesh,
+						bRealMeshWasHidden,
+						bRealMeshWasTickEnabled,
+						PreviousRealMeshTickOption);
+
+					if (BlendMesh)
+					{
+						BlendMesh->DestroyComponent();
+					}
+
+					return;
+				}
+
+				// Keep the bridge mesh following the real mesh/capsule during the blend.
+				if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
+				{
+					if (BlendMesh->GetAttachParent() != RealAttachParent)
+					{
+						BlendMesh->AttachToComponent(
+							RealAttachParent,
+							FAttachmentTransformRules::KeepWorldTransform,
+							RealMesh->GetAttachSocketName());
+					}
+
+					BlendMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
+				}
+				else
+				{
+					BlendMesh->SetWorldTransform(RealMesh->GetComponentTransform());
+				}
+
+				const float Elapsed = World->GetTimeSeconds() - BlendStartTime;
+				const float Alpha = FMath::Clamp(Elapsed / FMath::Max(BlendDuration, KINDA_SMALL_NUMBER), 0.f, 1.f);
+
+				// Smoothstep. Less robotic than raw linear interpolation.
+				const float SmoothAlpha = Alpha * Alpha * (3.f - 2.f * Alpha);
+
+				const FTransform BlendMeshWorldTransform = BlendMesh->GetComponentTransform();
+
+				for (const FBonePoseBlendData& BlendData : BoneBlendData)
+				{
+					if (BlendData.BoneName == NAME_None) continue;
+
+					const FTransform RealBoneWorldTransform =
+						RealMesh->GetSocketTransform(BlendData.BoneName, RTS_World);
+
+					const FTransform RealBoneComponentTransform =
+						RealBoneWorldTransform.GetRelativeTransform(BlendMeshWorldTransform);
+
+					FTransform BlendedTransform;
+					BlendedTransform.Blend(
+						BlendData.StartTransform,
+						RealBoneComponentTransform,
+						SmoothAlpha);
+
+					BlendMesh->SetBoneTransformByName(
+						BlendData.BoneName,
+						BlendedTransform,
+						EBoneSpaces::ComponentSpace);
+				}
+
+				if (Alpha < 1.f)
+				{
+					return;
+				}
+
+				World->GetTimerManager().ClearTimer(*BlendTimerHandle);
+
+				RestoreRealMeshAfterProxySwap(
+					RealMesh,
+					bRealMeshWasHidden,
+					bRealMeshWasTickEnabled,
+					PreviousRealMeshTickOption);
+
+				BlendMesh->DestroyComponent();
+
+				UE_LOG(LogTemp, Warning,
+					TEXT("Predicted reaction proxy pose-blended back to real mesh. RealMesh=%s Duration=%.3f"),
+					*GetNameSafe(RealMesh),
+					BlendDuration);
+			},
+			0.016f,
+			true);
+
+		return true;
+	}
+}
 
 FPLLocalHitFeedbackRuntime::FPLLocalHitFeedbackRuntime(UPL_CombatComponent& InCombatComponent)
 	: CombatComponent(InCombatComponent)
@@ -316,9 +523,33 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 					World->GetTimerManager().ClearTimer(*PollHandle);
 
-					RealMesh->SetHiddenInGame(bRealMeshWasHidden, true);
-					RealMesh->VisibilityBasedAnimTickOption = PreviousRealMeshTickOption;
-					RealMesh->SetComponentTickEnabled(bRealMeshWasTickEnabled);
+					if (ProxyMesh)
+					{
+						constexpr float PoseBlendDuration = 0.10f;
+
+						if (StartProxyToRealPoseBlend(
+							RealMesh,
+							ProxyMesh,
+							bRealMeshWasHidden,
+							bRealMeshWasTickEnabled,
+							PreviousRealMeshTickOption,
+							PoseBlendDuration))
+						{
+							UE_LOG(LogTemp, Warning,
+								TEXT("Predicted reaction proxy started pose blend back. RealMesh=%s Montage=%s TimedOut=%s"),
+								*GetNameSafe(RealMesh),
+								*GetNameSafe(MontageToPlay),
+								bTimedOut ? TEXT("TRUE") : TEXT("FALSE"));
+
+							return;
+						}
+					}
+
+					RestoreRealMeshAfterProxySwap(
+						RealMesh,
+						bRealMeshWasHidden,
+						bRealMeshWasTickEnabled,
+						PreviousRealMeshTickOption);
 
 					if (ProxyMesh)
 					{
@@ -326,7 +557,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 					}
 
 					UE_LOG(LogTemp, Warning,
-						TEXT("Predicted reaction proxy swapped back. RealMesh=%s Montage=%s TimedOut=%s"),
+						TEXT("Predicted reaction proxy swapped back without pose blend. RealMesh=%s Montage=%s TimedOut=%s"),
 						*GetNameSafe(RealMesh),
 						*GetNameSafe(MontageToPlay),
 						bTimedOut ? TEXT("TRUE") : TEXT("FALSE"));
