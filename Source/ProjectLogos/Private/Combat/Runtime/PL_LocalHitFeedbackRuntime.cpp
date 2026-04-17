@@ -3,8 +3,11 @@
 #include "Combat/Runtime/PL_LocalHitFeedbackRuntime.h"
 
 #include "AbilitySystemComponent.h"
+#include "AnimInstance/PL_AnimInstance.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Character/PL_BaseCharacter.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Combat/Components/PL_CombatComponent.h"
 #include "Combat/Data/PL_TagReactionData.h"
 #include "GameFramework/Pawn.h"
@@ -39,7 +42,7 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedHitFeedback(
 	Entry.TargetActor = HitActor;
 	Entry.TimeSeconds = Now;
 
-	PlayPredictedReactionMontage(HitActor, HitWindowSettings);
+	PlayPredictedReactionMontage(HitActor, HitResult, HitWindowSettings);
 
 	for (const FPLHitWindowGameplayCue& Cue : HitWindowSettings.GameplayCuesToExecute)
 	{
@@ -59,7 +62,8 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedHitFeedback(
 
 void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 	AActor* HitActor,
-	const FPLHitWindowSettings& HitWindowSettings) const
+	const FHitResult& HitResult,
+	const FPLHitWindowSettings& HitWindowSettings)
 {
 	if (!HitActor) return;
 
@@ -68,6 +72,12 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 
 	APL_BaseCharacter* TargetCharacter = Cast<APL_BaseCharacter>(HitActor);
 	if (!TargetCharacter) return;
+
+	USkeletalMeshComponent* TargetMesh = TargetCharacter->GetMesh();
+	if (!TargetMesh) return;
+
+	UAnimInstance* TargetAnimInstance = TargetMesh->GetAnimInstance();
+	if (!TargetAnimInstance) return;
 
 	for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : HitWindowSettings.GameplayEffectsToApply)
 	{
@@ -79,19 +89,249 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 		const FPL_TagReactionBinding* ReactionBinding = CombatComponent.FindTagReactionBindingForTriggerTag(TriggerTag);
 		if (!ReactionBinding) continue;
 
-		UAnimMontage* MontageToPlay = ReactionBinding->Ability.PredictedReactionMontage;
+		const FPL_TagReactionAbility& ReactionAbility = ReactionBinding->Ability;
+
+		UAnimMontage* MontageToPlay = ReactionAbility.PredictedReactionMontage;
 		if (!MontageToPlay) continue;
 
+		if (TargetAnimInstance->Montage_IsPlaying(MontageToPlay)) return;
+
+		if (ReactionAbility.PredictedMovementMode == EPLPredictedReactionMovementMode::VisualRootMotionOffset)
+		{
+			StartPredictedReactionVisualOffset(
+				TargetCharacter,
+				MontageToPlay,
+				ReactionAbility,
+				HitResult);
+		}
+
+		const float MontageLength = TargetAnimInstance->Montage_Play(
+			MontageToPlay,
+			1.f,
+			EMontagePlayReturnType::MontageLength,
+			0.f,
+			true);
+
+		if (MontageLength <= 0.f)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Predicted reaction montage failed to play. Attacker=%s Target=%s Montage=%s"),
+				*GetNameSafe(OwnerCharacter),
+				*GetNameSafe(TargetCharacter),
+				*GetNameSafe(MontageToPlay));
+
+			return;
+		}
+
+		if (UPL_CombatComponent* TargetCombatComponent = TargetCharacter->GetCombatComponent())
+		{
+			TargetCombatComponent->GetLocalHitFeedbackRuntime().RegisterPredictedReactionMontage(MontageToPlay);
+		}
+
 		UE_LOG(LogTemp, Warning,
-			TEXT("Predicted reaction montage found but one-mesh prediction path is disabled for cleanup. Attacker=%s Target=%s GE=%s TriggerTag=%s Montage=%s"),
+			TEXT("Predicted reaction montage played. Attacker=%s Target=%s GE=%s TriggerTag=%s Montage=%s Length=%.3f MovementMode=%d"),
 			*GetNameSafe(OwnerCharacter),
 			*GetNameSafe(TargetCharacter),
 			*GetNameSafe(GameplayEffectToApply.GameplayEffectClass),
 			*TriggerTag.ToString(),
-			*GetNameSafe(MontageToPlay));
+			*GetNameSafe(MontageToPlay),
+			MontageLength,
+			static_cast<int32>(ReactionAbility.PredictedMovementMode));
 
 		return;
 	}
+}
+
+void FPLLocalHitFeedbackRuntime::StartPredictedReactionVisualOffset(
+	APL_BaseCharacter* TargetCharacter,
+	UAnimMontage* Montage,
+	const FPL_TagReactionAbility& ReactionAbility,
+	const FHitResult& HitResult)
+{
+	if (!TargetCharacter || !Montage) return;
+
+	USkeletalMeshComponent* TargetMesh = TargetCharacter->GetMesh();
+	if (!TargetMesh) return;
+
+	UAnimInstance* TargetAnimInstance = TargetMesh->GetAnimInstance();
+	if (!TargetAnimInstance) return;
+
+	const UWorld* World = CombatComponent.GetWorld();
+	if (!World) return;
+
+	const FVector Direction = GetPredictionDirection(TargetCharacter, HitResult);
+	if (Direction.IsNearlyZero()) return;
+
+	FPLPredictedReactionVisualEntry& Entry = PredictedReactionVisuals.AddDefaulted_GetRef();
+	Entry.TargetCharacter = TargetCharacter;
+	Entry.TargetMesh = TargetMesh;
+	Entry.TargetAnimInstance = TargetAnimInstance;
+	Entry.Montage = Montage;
+	Entry.Direction = Direction;
+	Entry.Distance = ReactionAbility.PredictedVisualRootMotionDistance;
+	Entry.Duration = FMath::Max(0.01f, ReactionAbility.PredictedVisualRootMotionDuration);
+	Entry.BlendOutTime = FMath::Max(0.01f, ReactionAbility.PredictedVisualBlendOutTime);
+	Entry.StartTime = World->GetTimeSeconds();
+	Entry.BlendOutStartTime = 0.f;
+	Entry.LastAppliedOffset = FVector::ZeroVector;
+	Entry.bBlendingOut = false;
+	Entry.PreviousRootMotionMode = TargetAnimInstance->RootMotionMode;
+
+	if (UPL_AnimInstance* PLAnimInstance = Cast<UPL_AnimInstance>(TargetAnimInstance))
+	{
+		Entry.bPreviousPLRootMotionEnabled = PLAnimInstance->bRootMotionEnabled;
+		PLAnimInstance->bRootMotionEnabled = false;
+	}
+
+	// Important: predicted target knockback must not move the target capsule.
+	TargetAnimInstance->RootMotionMode = ERootMotionMode::IgnoreRootMotion;
+
+	// Local visual prediction needs ticking even after the hit notify window closes.
+	CombatComponent.SetComponentTickEnabled(true);
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Started predicted visual root motion. Target=%s Montage=%s Distance=%.2f Duration=%.2f BlendOut=%.2f"),
+		*GetNameSafe(TargetCharacter),
+		*GetNameSafe(Montage),
+		Entry.Distance,
+		Entry.Duration,
+		Entry.BlendOutTime);
+}
+
+void FPLLocalHitFeedbackRuntime::Tick(float DeltaTime)
+{
+	if (PredictedReactionVisuals.IsEmpty()) return;
+
+	const UWorld* World = CombatComponent.GetWorld();
+	if (!World) return;
+
+	const float Now = World->GetTimeSeconds();
+
+	for (int32 Index = PredictedReactionVisuals.Num() - 1; Index >= 0; --Index)
+	{
+		FPLPredictedReactionVisualEntry& Entry = PredictedReactionVisuals[Index];
+
+		if (!Entry.TargetCharacter.IsValid() ||
+			!Entry.TargetMesh.IsValid() ||
+			!Entry.TargetAnimInstance.IsValid() ||
+			!Entry.Montage.IsValid())
+		{
+			FinishPredictedReactionVisual(Entry);
+			PredictedReactionVisuals.RemoveAtSwap(Index);
+			continue;
+		}
+
+		UpdatePredictedReactionVisual(Entry, Now);
+
+		if (Entry.bBlendingOut)
+		{
+			const float BlendElapsed = Now - Entry.BlendOutStartTime;
+			if (BlendElapsed >= Entry.BlendOutTime)
+			{
+				FinishPredictedReactionVisual(Entry);
+				PredictedReactionVisuals.RemoveAtSwap(Index);
+			}
+		}
+	}
+}
+
+void FPLLocalHitFeedbackRuntime::UpdatePredictedReactionVisual(
+	FPLPredictedReactionVisualEntry& Entry,
+	const float Now)
+{
+	USkeletalMeshComponent* TargetMesh = Entry.TargetMesh.Get();
+	UAnimInstance* TargetAnimInstance = Entry.TargetAnimInstance.Get();
+
+	if (!TargetMesh || !TargetAnimInstance) return;
+
+	const bool bMontageStillPlaying = TargetAnimInstance->Montage_IsPlaying(Entry.Montage.Get());
+
+	if (!Entry.bBlendingOut && !bMontageStillPlaying)
+	{
+		Entry.bBlendingOut = true;
+		Entry.BlendOutStartTime = Now;
+	}
+
+	const float Elapsed = Now - Entry.StartTime;
+
+	FVector DesiredOffset = FVector::ZeroVector;
+
+	if (!Entry.bBlendingOut)
+	{
+		const float Alpha = FMath::Clamp(Elapsed / Entry.Duration, 0.f, 1.f);
+		const float SmoothedAlpha = FMath::InterpEaseOut(0.f, 1.f, Alpha, 2.f);
+
+		DesiredOffset = Entry.Direction * Entry.Distance * SmoothedAlpha;
+
+		if (Alpha >= 1.f)
+		{
+			Entry.bBlendingOut = true;
+			Entry.BlendOutStartTime = Now;
+		}
+	}
+	else
+	{
+		const float BlendElapsed = Now - Entry.BlendOutStartTime;
+		const float BlendAlpha = FMath::Clamp(BlendElapsed / Entry.BlendOutTime, 0.f, 1.f);
+
+		DesiredOffset = FMath::Lerp(Entry.LastAppliedOffset, FVector::ZeroVector, BlendAlpha);
+	}
+
+	// Additive over whatever CharacterMovement/network smoothing has done this frame.
+	const FVector CurrentBaseRelativeLocation = TargetMesh->GetRelativeLocation() - Entry.LastAppliedOffset;
+	TargetMesh->SetRelativeLocation(CurrentBaseRelativeLocation + DesiredOffset);
+
+	Entry.LastAppliedOffset = DesiredOffset;
+}
+
+void FPLLocalHitFeedbackRuntime::FinishPredictedReactionVisual(FPLPredictedReactionVisualEntry& Entry)
+{
+	USkeletalMeshComponent* TargetMesh = Entry.TargetMesh.Get();
+	UAnimInstance* TargetAnimInstance = Entry.TargetAnimInstance.Get();
+
+	if (TargetMesh)
+	{
+		const FVector CurrentBaseRelativeLocation = TargetMesh->GetRelativeLocation() - Entry.LastAppliedOffset;
+		TargetMesh->SetRelativeLocation(CurrentBaseRelativeLocation);
+	}
+
+	if (TargetAnimInstance)
+	{
+		TargetAnimInstance->RootMotionMode = Entry.PreviousRootMotionMode;
+
+		if (UPL_AnimInstance* PLAnimInstance = Cast<UPL_AnimInstance>(TargetAnimInstance))
+		{
+			PLAnimInstance->bRootMotionEnabled = Entry.bPreviousPLRootMotionEnabled;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Finished predicted visual root motion. Target=%s Montage=%s"),
+		*GetNameSafe(Entry.TargetCharacter.Get()),
+		*GetNameSafe(Entry.Montage.Get()));
+}
+
+FVector FPLLocalHitFeedbackRuntime::GetPredictionDirection(
+	APL_BaseCharacter* TargetCharacter,
+	const FHitResult& HitResult) const
+{
+	if (!TargetCharacter) return FVector::ZeroVector;
+
+	AActor* OwnerActor = CombatComponent.GetOwner();
+
+	FVector Direction = FVector::ZeroVector;
+
+	if (OwnerActor)
+	{
+		Direction = TargetCharacter->GetActorLocation() - OwnerActor->GetActorLocation();
+	}
+	else if (!HitResult.ImpactNormal.IsNearlyZero())
+	{
+		Direction = -HitResult.ImpactNormal;
+	}
+
+	Direction.Z = 0.f;
+	return Direction.GetSafeNormal();
 }
 
 void FPLLocalHitFeedbackRuntime::RegisterPredictedReactionMontage(UAnimMontage* Montage)

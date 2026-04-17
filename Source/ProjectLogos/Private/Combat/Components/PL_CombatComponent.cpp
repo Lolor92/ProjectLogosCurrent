@@ -116,7 +116,6 @@ bool UPL_CombatComponent::ShouldSuppressPredictedReactionMontageReplay(const UAn
 
 	if (!Montage || !OwnerActor) return false;
 	if (OwnerActor->HasAuthority()) return false;
-	if (OwningCharacter && OwningCharacter->IsLocallyControlled()) return false;
 
 	const bool bShouldSuppress = LocalHitFeedbackRuntime.ShouldSuppressPredictedReactionMontageReplay(Montage);
 
@@ -305,11 +304,15 @@ void UPL_CombatComponent::RemoveGameplayEffect(FActiveGameplayEffectHandle& Effe
 	EffectHandle.Invalidate();
 }
 
-void UPL_CombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPL_CombatComponent::TickComponent(
+	float DeltaTime,
+	ELevelTick TickType,
+	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	HitWindowRuntime.Tick();
+	LocalHitFeedbackRuntime.Tick(DeltaTime);
 }
 
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState,
@@ -318,7 +321,14 @@ bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* Notify
 	return HitWindowRuntime.BeginHitDetectionWindow(NotifyState, MeshComp, TraceSocketName, HitWindowSettings);
 }
 
-void UPL_CombatComponent::EndHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp)
+void UPL_CombatComponent::EndHitDetectionWindow(
+	const UAnimNotifyState* NotifyState,
+	USkeletalMeshComponent* MeshComp)
 {
 	HitWindowRuntime.EndHitDetectionWindow(NotifyState, MeshComp);
+
+	if (LocalHitFeedbackRuntime.HasActivePredictedReactionVisuals())
+	{
+		SetComponentTickEnabled(true);
+	}
 }

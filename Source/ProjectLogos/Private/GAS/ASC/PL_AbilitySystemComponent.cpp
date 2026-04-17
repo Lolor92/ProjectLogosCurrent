@@ -50,7 +50,8 @@ float UPL_AbilitySystemComponent::PlayMontage(
 
 void UPL_AbilitySystemComponent::OnRep_ReplicatedAnimMontage()
 {
-	UAnimMontage* ReplicatedMontage = RepAnimMontageInfo.GetAnimMontage();
+	const FGameplayAbilityRepAnimMontage& ReplicatedMontageInfo = GetRepAnimMontageInfo();
+	UAnimMontage* ReplicatedMontage = ReplicatedMontageInfo.GetAnimMontage();
 
 	UE_LOG(LogTemp, Warning,
 		TEXT("ASC OnRep_ReplicatedAnimMontage called. Avatar=%s HasAuthority=%s IsLocallyControlled=%s Montage=%s"),

@@ -18,6 +18,15 @@ enum class EPL_TagReactionPolicy : uint8
 	Both     UMETA(DisplayName="On Both")
 };
 
+UENUM(BlueprintType)
+enum class EPLPredictedReactionMovementMode : uint8
+{
+	MontageOnly UMETA(DisplayName="Montage Only"),
+
+	// Client-side visual knockback. Does not move the replicated capsule.
+	VisualRootMotionOffset UMETA(DisplayName="Visual Root Motion Offset")
+};
+
 USTRUCT(BlueprintType)
 struct FPL_TagReactionAbility
 {
@@ -28,6 +37,19 @@ struct FPL_TagReactionAbility
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction")
 	TObjectPtr<UAnimMontage> PredictedReactionMontage = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction")
+	EPLPredictedReactionMovementMode PredictedMovementMode = EPLPredictedReactionMovementMode::MontageOnly;
+
+	// Mesh-only local offset used for predicted knockback/pushback.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction", meta=(ClampMin="0.0", UIMin="0.0", Units="cm"))
+	float PredictedVisualRootMotionDistance = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction", meta=(ClampMin="0.01", UIMin="0.01", Units="Seconds"))
+	float PredictedVisualRootMotionDuration = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Prediction", meta=(ClampMin="0.01", UIMin="0.01", Units="Seconds"))
+	float PredictedVisualBlendOutTime = 0.15f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ability", meta=(ClampMin="0.0", UIMin="0.0", Units="Seconds"))
 	float DelaySeconds = 0.f;
