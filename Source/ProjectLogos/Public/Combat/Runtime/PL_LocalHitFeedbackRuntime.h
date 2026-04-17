@@ -21,6 +21,7 @@ struct FPLPredictedReactionMontageEntry
 {
 	TWeakObjectPtr<UAnimMontage> Montage;
 	float TimeSeconds = 0.f;
+	bool bHasLoggedSuppression = false;
 };
 
 class PROJECTLOGOS_API FPLLocalHitFeedbackRuntime
@@ -37,11 +38,7 @@ public:
 
 	void RegisterPredictedReactionMontage(UAnimMontage* Montage);
 
-	bool TryCorrectPredictedReactionMontage(
-		const UAnimMontage* Montage,
-		float CurrentPositionSeconds,
-		float& OutCorrectedPositionSeconds,
-		bool& bOutShouldStop);
+	bool ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage);
 
 	void PruneOldEntries();
 
@@ -65,9 +62,6 @@ private:
 
 	float DuplicateSuppressionTime = 0.35f;
 
-	// Must be longer than your longest predicted reaction + bad ping.
-	float PredictedReactionCorrectionTime = 2.5f;
-
-	// Prevents tiny normal montage drift from being treated as a server restart.
-	float PredictedReactionCorrectionTolerance = 0.05f;
+	// Long enough for knockdown/pushback plus bad ping.
+	float PredictedReactionReplaySuppressionTime = 2.5f;
 };

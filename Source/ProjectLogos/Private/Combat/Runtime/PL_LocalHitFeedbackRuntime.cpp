@@ -131,6 +131,7 @@ void FPLLocalHitFeedbackRuntime::RegisterPredictedReactionMontage(UAnimMontage* 
 	FPLPredictedReactionMontageEntry& Entry = RecentPredictedReactionMontages.AddDefaulted_GetRef();
 	Entry.Montage = Montage;
 	Entry.TimeSeconds = Now;
+	Entry.bHasLoggedSuppression = false;
 
 	UE_LOG(LogTemp, Warning, TEXT("Registered predicted reaction montage receipt. Owner=%s Montage=%s Time=%.3f"),
 		*GetNameSafe(CombatComponent.GetOwner()),
@@ -138,15 +139,8 @@ void FPLLocalHitFeedbackRuntime::RegisterPredictedReactionMontage(UAnimMontage* 
 		Now);
 }
 
-bool FPLLocalHitFeedbackRuntime::TryCorrectPredictedReactionMontage(
-	const UAnimMontage* Montage,
-	const float CurrentPositionSeconds,
-	float& OutCorrectedPositionSeconds,
-	bool& bOutShouldStop)
+bool FPLLocalHitFeedbackRuntime::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage)
 {
-	OutCorrectedPositionSeconds = 0.f;
-	bOutShouldStop = false;
-
 	if (!Montage) return false;
 
 	const UWorld* World = CombatComponent.GetWorld();
@@ -155,48 +149,24 @@ bool FPLLocalHitFeedbackRuntime::TryCorrectPredictedReactionMontage(
 	PruneOldReactionMontageEntries();
 
 	const float Now = World->GetTimeSeconds();
-	const float MontageLength = Montage->GetPlayLength();
 
-	for (const FPLPredictedReactionMontageEntry& Entry : RecentPredictedReactionMontages)
+	for (FPLPredictedReactionMontageEntry& Entry : RecentPredictedReactionMontages)
 	{
 		if (Entry.Montage.Get() != Montage) continue;
 
 		const float ElapsedSincePredictedPlaySeconds = Now - Entry.TimeSeconds;
 		if (ElapsedSincePredictedPlaySeconds <= 0.f) return false;
 
-		// This is probably the original predicted montage still playing normally.
-		if (CurrentPositionSeconds + PredictedReactionCorrectionTolerance >= ElapsedSincePredictedPlaySeconds)
+		if (!Entry.bHasLoggedSuppression)
 		{
-			return false;
-		}
-
-		// Server replay arrived after the predicted montage should already be done.
-		if (MontageLength <= 0.f || ElapsedSincePredictedPlaySeconds >= MontageLength)
-		{
-			bOutShouldStop = true;
+			Entry.bHasLoggedSuppression = true;
 
 			UE_LOG(LogTemp, Warning,
-				TEXT("Predicted reaction duplicate should stop. Owner=%s Montage=%s Current=%.3f Elapsed=%.3f Length=%.3f"),
+				TEXT("Suppressing duplicate server reaction montage before replay. Owner=%s Montage=%s Elapsed=%.3f"),
 				*GetNameSafe(CombatComponent.GetOwner()),
 				*GetNameSafe(Montage),
-				CurrentPositionSeconds,
-				ElapsedSincePredictedPlaySeconds,
-				MontageLength);
-
-			return true;
+				ElapsedSincePredictedPlaySeconds);
 		}
-
-		OutCorrectedPositionSeconds = FMath::Clamp(
-			ElapsedSincePredictedPlaySeconds,
-			0.f,
-			MontageLength);
-
-		UE_LOG(LogTemp, Warning,
-			TEXT("Predicted reaction correction found. Owner=%s Montage=%s Current=%.3f Corrected=%.3f"),
-			*GetNameSafe(CombatComponent.GetOwner()),
-			*GetNameSafe(Montage),
-			CurrentPositionSeconds,
-			OutCorrectedPositionSeconds);
 
 		return true;
 	}
@@ -248,7 +218,8 @@ void FPLLocalHitFeedbackRuntime::PruneOldReactionMontageEntries()
 	RecentPredictedReactionMontages.RemoveAll(
 		[this, Now](const FPLPredictedReactionMontageEntry& Entry)
 		{
-			return !Entry.Montage.IsValid() || Now - Entry.TimeSeconds > PredictedReactionCorrectionTime;
+			return !Entry.Montage.IsValid() ||
+				Now - Entry.TimeSeconds > PredictedReactionReplaySuppressionTime;
 		});
 }
 
