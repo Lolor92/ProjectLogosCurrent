@@ -92,8 +92,40 @@ void FPLLocalHitFeedbackRuntime::PlayPredictedReactionMontage(
 
 		if (TargetAnimInstance->Montage_IsPlaying(MontageToPlay)) return;
 
+		const ERootMotionMode::Type PreviousRootMotionMode = TargetAnimInstance->RootMotionMode;
+
+		// Keep root motion visually inside the pose, but do not let this local-only prediction
+		// move the simulated target capsule. Server movement remains authoritative.
+		TargetAnimInstance->SetRootMotionMode(ERootMotionMode::NoRootMotionExtraction);
+
 		const float MontageLength = TargetAnimInstance->Montage_Play(MontageToPlay, 1.f);
-		if (MontageLength <= 0.f) return;
+
+		if (MontageLength <= 0.f)
+		{
+			TargetAnimInstance->SetRootMotionMode(PreviousRootMotionMode);
+			return;
+		}
+
+		TWeakObjectPtr<UAnimInstance> WeakAnimInstance = TargetAnimInstance;
+
+		FOnMontageBlendingOutStarted RestoreRootMotionModeDelegate;
+		RestoreRootMotionModeDelegate.BindLambda(
+			[WeakAnimInstance, PreviousRootMotionMode, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
+			{
+				if (Montage != MontageToPlay) return;
+
+				UAnimInstance* AnimInstance = WeakAnimInstance.Get();
+				if (!AnimInstance) return;
+
+				AnimInstance->SetRootMotionMode(PreviousRootMotionMode);
+
+				UE_LOG(LogTemp, Warning,
+					TEXT("Restored predicted reaction root motion mode. Montage=%s Interrupted=%s"),
+					*GetNameSafe(Montage),
+					bInterrupted ? TEXT("TRUE") : TEXT("FALSE"));
+			});
+
+		TargetAnimInstance->Montage_SetBlendingOutDelegate(RestoreRootMotionModeDelegate, MontageToPlay);
 
 		if (UPL_CombatComponent* TargetCombatComponent = TargetCharacter->GetCombatComponent())
 		{
