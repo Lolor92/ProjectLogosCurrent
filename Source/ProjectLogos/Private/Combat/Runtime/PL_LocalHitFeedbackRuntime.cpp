@@ -30,37 +30,169 @@ namespace
 		RealMesh->SetComponentTickEnabled(bRealMeshWasTickEnabled);
 	}
 
-	void SyncProxyMeshToRealMeshPoseForSwap(
-		USkeletalMeshComponent* ProxyMesh,
-		USkeletalMeshComponent* RealMesh)
+	FName GetCommonSwapAlignmentBone(
+		const USkeletalMeshComponent* RealMesh,
+		const USkeletalMeshComponent* ProxyMesh)
 	{
-		if (!ProxyMesh || !RealMesh) return;
+		if (!RealMesh || !ProxyMesh) return NAME_None;
 
-		if (USceneComponent* RealAttachParent = RealMesh->GetAttachParent())
+		static const FName PelvisBoneName(TEXT("pelvis"));
+
+		if (RealMesh->GetBoneIndex(PelvisBoneName) != INDEX_NONE &&
+			ProxyMesh->GetBoneIndex(PelvisBoneName) != INDEX_NONE)
 		{
-			if (ProxyMesh->GetAttachParent() != RealAttachParent)
+			return PelvisBoneName;
+		}
+
+		const FName RootBoneName = RealMesh->GetBoneName(0);
+
+		if (RootBoneName != NAME_None &&
+			ProxyMesh->GetBoneIndex(RootBoneName) != INDEX_NONE)
+		{
+			return RootBoneName;
+		}
+
+		return NAME_None;
+	}
+
+	void RefreshMeshVisualPose(USkeletalMeshComponent* Mesh)
+	{
+		if (!Mesh) return;
+
+		Mesh->TickAnimation(0.f, false);
+		Mesh->RefreshBoneTransforms();
+		Mesh->UpdateComponentToWorld();
+		Mesh->MarkRenderTransformDirty();
+		Mesh->MarkRenderDynamicDataDirty();
+	}
+
+	void MoveRealMeshVisualsToProxyForReveal(
+		USkeletalMeshComponent* RealMesh,
+		USkeletalMeshComponent* ProxyMesh)
+	{
+		if (!RealMesh || !ProxyMesh) return;
+
+		RefreshMeshVisualPose(RealMesh);
+		RefreshMeshVisualPose(ProxyMesh);
+
+		const FName AlignmentBone = GetCommonSwapAlignmentBone(RealMesh, ProxyMesh);
+
+		if (AlignmentBone == NAME_None)
+		{
+			RealMesh->SetWorldTransform(
+				ProxyMesh->GetComponentTransform(),
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+
+			RefreshMeshVisualPose(RealMesh);
+			return;
+		}
+
+		const FVector ProxyBoneLocation = ProxyMesh->GetSocketLocation(AlignmentBone);
+		const FVector RealBoneLocation = RealMesh->GetSocketLocation(AlignmentBone);
+
+		FVector BoneDelta = ProxyBoneLocation - RealBoneLocation;
+
+		// Mostly root-motion correction. Avoid big vertical foot popping.
+		if (FMath::Abs(BoneDelta.Z) > 8.f)
+		{
+			BoneDelta.Z = 0.f;
+		}
+
+		RealMesh->AddWorldOffset(
+			BoneDelta,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+
+		RefreshMeshVisualPose(RealMesh);
+	}
+
+	void SmoothRealMeshBackToOriginalRelativeTransform(
+		USkeletalMeshComponent* RealMesh,
+		const FTransform& OriginalRelativeTransform)
+	{
+		if (!RealMesh) return;
+
+		UWorld* World = RealMesh->GetWorld();
+
+		if (!World || World->bIsTearingDown)
+		{
+			RealMesh->SetRelativeTransform(
+				OriginalRelativeTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+
+			return;
+		}
+
+		const FTransform StartRelativeTransform = RealMesh->GetRelativeTransform();
+
+		const float BlendDuration = 0.10f;
+		const float BlendTickRate = 1.f / 60.f;
+		const float StartTime = World->GetTimeSeconds();
+
+		TWeakObjectPtr<USkeletalMeshComponent> WeakRealMesh = RealMesh;
+		TSharedRef<FTimerHandle> BlendHandle = MakeShared<FTimerHandle>();
+
+		World->GetTimerManager().SetTimer(
+			*BlendHandle,
+			[WeakRealMesh, BlendHandle, StartTime, StartRelativeTransform, OriginalRelativeTransform, BlendDuration]()
 			{
-				ProxyMesh->AttachToComponent(
-					RealAttachParent,
-					FAttachmentTransformRules::KeepWorldTransform,
-					RealMesh->GetAttachSocketName());
-			}
+				USkeletalMeshComponent* Mesh = WeakRealMesh.Get();
 
-			ProxyMesh->SetRelativeTransform(RealMesh->GetRelativeTransform());
-		}
-		else
-		{
-			ProxyMesh->SetWorldTransform(RealMesh->GetComponentTransform());
-		}
+				if (!Mesh)
+				{
+					return;
+				}
 
-		// Make the visible proxy use the hidden real mesh's current evaluated bone pose.
-		// After a few frames of this, revealing the real mesh should not pop.
-		ProxyMesh->SetLeaderPoseComponent(RealMesh, true);
+				UWorld* World = Mesh->GetWorld();
 
-		ProxyMesh->bPauseAnims = false;
-		ProxyMesh->SetComponentTickEnabled(true);
-		ProxyMesh->MarkRenderTransformDirty();
-		ProxyMesh->MarkRenderDynamicDataDirty();
+				if (!World || World->bIsTearingDown)
+				{
+					return;
+				}
+
+				const float Elapsed = World->GetTimeSeconds() - StartTime;
+				const float Alpha = FMath::Clamp(Elapsed / BlendDuration, 0.f, 1.f);
+				const float SmoothAlpha = FMath::SmoothStep(0.f, 1.f, Alpha);
+
+				const FVector NewLocation = FMath::Lerp(
+					StartRelativeTransform.GetLocation(),
+					OriginalRelativeTransform.GetLocation(),
+					SmoothAlpha);
+
+				const FQuat NewRotation = FQuat::Slerp(
+					StartRelativeTransform.GetRotation(),
+					OriginalRelativeTransform.GetRotation(),
+					SmoothAlpha).GetNormalized();
+
+				const FVector NewScale = OriginalRelativeTransform.GetScale3D();
+
+				Mesh->SetRelativeTransform(
+					FTransform(NewRotation, NewLocation, NewScale),
+					false,
+					nullptr,
+					ETeleportType::TeleportPhysics);
+
+				Mesh->MarkRenderTransformDirty();
+				Mesh->MarkRenderDynamicDataDirty();
+
+				if (Alpha >= 1.f)
+				{
+					Mesh->SetRelativeTransform(
+						OriginalRelativeTransform,
+						false,
+						nullptr,
+						ETeleportType::TeleportPhysics);
+
+					World->GetTimerManager().ClearTimer(*BlendHandle);
+				}
+			},
+			BlendTickRate,
+			true);
 	}
 }
 
@@ -200,6 +332,8 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 	// Local-only visual swap.
 	// Keep the hidden real mesh fully animated so swap-back does not reveal a stale pose.
+	const FTransform OriginalRealMeshRelativeTransform = RealMesh->GetRelativeTransform();
+
 	const bool bRealMeshWasHidden = RealMesh->bHiddenInGame;
 	const bool bRealMeshWasTickEnabled = RealMesh->IsComponentTickEnabled();
 	const EVisibilityBasedAnimTickOption PreviousRealMeshTickOption = RealMesh->VisibilityBasedAnimTickOption;
@@ -242,7 +376,7 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 	FOnMontageBlendingOutStarted BlendOutDelegate;
 	BlendOutDelegate.BindLambda(
-		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
+		[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, OriginalRealMeshRelativeTransform, MontageToPlay](UAnimMontage* Montage, bool bInterrupted)
 		{
 			if (Montage != MontageToPlay) return;
 
@@ -287,13 +421,11 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 
 			TSharedRef<FTimerHandle> PollHandle = MakeShared<FTimerHandle>();
 			TSharedRef<float> ServerReactionFinishedTime = MakeShared<float>(-1.f);
-			TSharedRef<bool> bProxyHasMatchedRealPose = MakeShared<bool>(false);
-			TSharedRef<float> ProxyMatchedRealPoseTime = MakeShared<float>(-1.f);
 			const float PostServerReactionSettleTime = 0.08f;
 
 			World->GetTimerManager().SetTimer(
 				*PollHandle,
-				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle, ServerReactionFinishedTime, bProxyHasMatchedRealPose, ProxyMatchedRealPoseTime, PostServerReactionSettleTime]()
+				[WeakRealMesh, WeakProxyMesh, bRealMeshWasHidden, bRealMeshWasTickEnabled, PreviousRealMeshTickOption, OriginalRealMeshRelativeTransform, MontageToPlay, ProxyFinishedTime, MaxHoldTime, PollHandle, ServerReactionFinishedTime, PostServerReactionSettleTime]()
 				{
 					USkeletalMeshComponent* RealMesh = WeakRealMesh.Get();
 					USkeletalMeshComponent* ProxyMesh = WeakProxyMesh.Get();
@@ -375,38 +507,15 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 						return;
 					}
 
-					// New phase:
-					// Before revealing the real mesh, make the proxy copy the real mesh pose for a few frames.
-					// This makes the final visual swap happen between two matching poses.
-					if (ProxyMesh && !*bProxyHasMatchedRealPose)
-					{
-						SyncProxyMeshToRealMeshPoseForSwap(ProxyMesh, RealMesh);
-
-						*bProxyHasMatchedRealPose = true;
-						*ProxyMatchedRealPoseTime = Now;
-
-						UE_LOG(LogTemp, Warning,
-							TEXT("Predicted proxy matched hidden real mesh pose before swap. RealMesh=%s ProxyMesh=%s Montage=%s"),
-							*GetNameSafe(RealMesh),
-							*GetNameSafe(ProxyMesh),
-							*GetNameSafe(MontageToPlay));
-
-						return;
-					}
-
-					const float PoseMatchHoldTime = 0.06f;
-
-					if (*bProxyHasMatchedRealPose && Now - *ProxyMatchedRealPoseTime < PoseMatchHoldTime && !bTimedOut)
-					{
-						if (ProxyMesh)
-						{
-							SyncProxyMeshToRealMeshPoseForSwap(ProxyMesh, RealMesh);
-						}
-
-						return;
-					}
-
 					World->GetTimerManager().ClearTimer(*PollHandle);
+
+					if (ProxyMesh)
+					{
+						// Important:
+						// The proxy is the thing the player is currently seeing.
+						// So move the hidden real mesh visually to the proxy, not the other way around.
+						MoveRealMeshVisualsToProxyForReveal(RealMesh, ProxyMesh);
+					}
 
 					RestoreRealMeshAfterProxySwap(
 						RealMesh,
@@ -417,6 +526,21 @@ bool FPLLocalHitFeedbackRuntime::PlayPredictedReactionProxyMontage(
 					if (ProxyMesh)
 					{
 						ProxyMesh->DestroyComponent();
+					}
+
+					if (!bRealMeshWasHidden)
+					{
+						SmoothRealMeshBackToOriginalRelativeTransform(
+							RealMesh,
+							OriginalRealMeshRelativeTransform);
+					}
+					else
+					{
+						RealMesh->SetRelativeTransform(
+							OriginalRealMeshRelativeTransform,
+							false,
+							nullptr,
+							ETeleportType::TeleportPhysics);
 					}
 
 					UE_LOG(LogTemp, Warning,
