@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
+#include "GAS/Attribute/PL_AttributeSet.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
@@ -25,7 +26,8 @@ APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer
 
 	// Collision defaults.
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-	GetCapsuleComponent()->SetGenerateOverlapEvents(false);
+	// NPC aggro sensors rely on character capsules producing overlap events.
+	GetCapsuleComponent()->SetGenerateOverlapEvents(true);
 
 	GetMesh()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 	GetMesh()->SetGenerateOverlapEvents(true);
@@ -86,6 +88,35 @@ UAttributeSet* APL_BaseCharacter::GetAttributeSet() const
 
 	const APL_PlayerState* PL_PlayerState = GetPlayerState<APL_PlayerState>();
 	return PL_PlayerState ? PL_PlayerState->GetAttributeSet() : nullptr;
+}
+
+UPL_AttributeSet* APL_BaseCharacter::GetPLAttributeSet() const
+{
+	return Cast<UPL_AttributeSet>(GetAttributeSet());
+}
+
+bool APL_BaseCharacter::IsFriendlyTo(const APL_BaseCharacter* OtherCharacter) const
+{
+	if (!OtherCharacter) return false;
+	if (OtherCharacter == this) return true;
+	if (FactionId.IsNone() || OtherCharacter->FactionId.IsNone()) return false;
+
+	return FactionId == OtherCharacter->FactionId;
+}
+
+bool APL_BaseCharacter::IsHostileTo(const APL_BaseCharacter* OtherCharacter) const
+{
+	return OtherCharacter && OtherCharacter != this && !IsFriendlyTo(OtherCharacter);
+}
+
+bool APL_BaseCharacter::IsAlive() const
+{
+	if (const UPL_AttributeSet* PLAttributeSet = GetPLAttributeSet())
+	{
+		return PLAttributeSet->GetHealth() > 0.f;
+	}
+
+	return true;
 }
 
 void APL_BaseCharacter::SetAbilityAnimState(const FRepAbilityAnimState& NewState)
@@ -211,6 +242,33 @@ void APL_BaseCharacter::ApplyHitStop(float Duration, float TimeScale)
 		}),
 		Duration,
 		false);
+}
+
+void APL_BaseCharacter::RotateToFaceActor(AActor* TargetActor)
+{
+	if (!TargetActor || TargetActor == this)
+	{
+		return;
+	}
+
+	FVector Direction = TargetActor->GetActorLocation() - GetActorLocation();
+	Direction.Z = 0.f;
+
+	const FVector FacingDirection = Direction.GetSafeNormal();
+	if (FacingDirection.IsNearlyZero())
+	{
+		return;
+	}
+
+	FRotator DesiredRotation = GetActorRotation();
+	DesiredRotation.Yaw = FacingDirection.Rotation().Yaw;
+
+	SetActorRotation(DesiredRotation, ETeleportType::ResetPhysics);
+
+	if (AController* CharacterController = GetController())
+	{
+		CharacterController->SetControlRotation(DesiredRotation);
+	}
 }
 
 void APL_BaseCharacter::InitializeDefaultAttributes()

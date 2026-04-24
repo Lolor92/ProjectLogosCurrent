@@ -103,6 +103,13 @@ bool UPL_CombatComponent::IsParryingActive() const
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ParryingTag);
 }
 
+bool UPL_CombatComponent::IsCrowdControlActive() const
+{
+	return AbilitySystemComponent
+		&& CrowdControlTag.IsValid()
+		&& AbilitySystemComponent->HasMatchingGameplayTag(CrowdControlTag);
+}
+
 bool UPL_CombatComponent::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage)
 {
 	AActor* OwnerActor = GetOwner();

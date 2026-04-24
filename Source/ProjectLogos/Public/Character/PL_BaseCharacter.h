@@ -9,6 +9,7 @@
 class UPL_CombatComponent;
 class UAbilitySystemComponent;
 class UAttributeSet;
+class UPL_AttributeSet;
 class UAnimMontage;
 class UGameplayEffect;
 struct FTimerHandle;
@@ -69,6 +70,22 @@ public:
 	// GAS can live on this character or on the owning player state.
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	UAttributeSet* GetAttributeSet() const;
+	UPL_AttributeSet* GetPLAttributeSet() const;
+
+	UFUNCTION(BlueprintPure, Category="Combat|Faction")
+	FName GetFactionId() const { return FactionId; }
+
+	UFUNCTION(BlueprintPure, Category="Combat|Faction")
+	bool IsFriendlyTo(const APL_BaseCharacter* OtherCharacter) const;
+
+	UFUNCTION(BlueprintPure, Category="Combat|Faction")
+	bool IsHostileTo(const APL_BaseCharacter* OtherCharacter) const;
+
+	UFUNCTION(BlueprintPure, Category="Combat|Targeting")
+	bool IsAlive() const;
+
+	UFUNCTION(BlueprintPure, Category="Combat|Targeting")
+	bool CanBeTargeted() const { return bCanBeTargeted; }
 
 	// Ability animation state.
 	UFUNCTION(BlueprintCallable, Category="Ability|Animation")
@@ -79,6 +96,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="HitStop")
 	void ApplyHitStop(float Duration, float TimeScale = 0.f);
+
+	UFUNCTION(BlueprintCallable, Category="Combat|Rotation")
+	void RotateToFaceActor(AActor* TargetActor);
 	
 	const FRepAbilityAnimState& GetAbilityAnimState() const { return AbilityAnimState; }
 	UPL_CombatComponent* GetCombatComponent() const { return CombatComponent; }
@@ -116,6 +136,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Attributes")
 	TArray<TSubclassOf<UGameplayEffect>> DefaultAttributeEffects;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Faction")
+	FName FactionId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Targeting")
+	bool bCanBeTargeted = true;
 	
 	// Combat setup and reactions.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat")

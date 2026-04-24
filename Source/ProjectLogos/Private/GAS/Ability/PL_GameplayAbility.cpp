@@ -38,10 +38,19 @@ void UPL_GameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 	// Per-run combo/collision state.
 	ActivationSequenceId = (ActivationSequenceId == MAX_uint32) ? 1u : (ActivationSequenceId + 1u);
 	ResetComboWindow();
+	
+	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+
+	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	InterruptOtherActiveAbilities();
+	
 	bRootMotionStoppedByCollision = false;
 	RotateAvatarToControllerYawOnActivate();
-
-	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
 	// Collision binding is per activation and removed when the ability ends.
 	BindRootMotionCollisionStop();
@@ -91,6 +100,21 @@ void UPL_GameplayAbility::RotateAvatarToControllerYawOnActivate() const
 	Character->SetActorRotation(NewRot, ETeleportType::ResetPhysics);
 }
 
+void UPL_GameplayAbility::RotateAvatarToFaceActorOnActivate(AActor* TargetActor) const
+{
+	if (!TargetActor) return;
+
+	const FGameplayAbilityActorInfo* Info = GetCurrentActorInfo();
+	if (!Info) return;
+
+	APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(Info->AvatarActor.Get());
+	if (!Character) return;
+
+	if (!Info->IsLocallyControlled() && !Info->IsNetAuthority()) return;
+
+	Character->RotateToFaceActor(TargetActor);
+}
+
 void UPL_GameplayAbility::BindRootMotionCollisionStop()
 {
 	if (!bStopRootMotionOnCollision) return;
@@ -107,6 +131,8 @@ void UPL_GameplayAbility::BindRootMotionCollisionStop()
 
 bool UPL_GameplayAbility::CanUseAbility(const FGameplayAbilityActorInfo* ActorInfo) const
 {
+	if (bInterruptOtherAbilitiesOnActivate) return true;
+
 	const APL_BaseCharacter* Character = ActorInfo ? Cast<APL_BaseCharacter>(ActorInfo->AvatarActor.Get()) : nullptr;
 	if (!Character) return true;
 
@@ -132,6 +158,16 @@ bool UPL_GameplayAbility::CanUseAbility(const FGameplayAbilityActorInfo* ActorIn
 
 	const float Percent = (AnimInstance->Montage_GetPosition(ActiveMontage) / MontageLength) * 100.f;
 	return Percent >= ActivePLAbility->MontageLockout.MontageProgressBeforeInterrupt;
+}
+
+void UPL_GameplayAbility::InterruptOtherActiveAbilities() const
+{
+	if (!bInterruptOtherAbilitiesOnActivate) return;
+
+	UAbilitySystemComponent* AbilitySystemComponent = GetAbilitySystemComponentFromActorInfo();
+	if (!AbilitySystemComponent) return;
+
+	AbilitySystemComponent->CancelAllAbilities(const_cast<ThisClass*>(this));
 }
 
 void UPL_GameplayAbility::OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* OtherActor,

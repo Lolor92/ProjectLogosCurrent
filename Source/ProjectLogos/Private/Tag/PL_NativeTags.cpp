@@ -21,6 +21,17 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_ContainerId_SkillbarInventory, "ContainerId.SkillbarI
 
 // Cooldowns and damage types.
 UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown, "Cooldown");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability, "Cooldown.Ability");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill1, "Cooldown.Ability.Skill1");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill2, "Cooldown.Ability.Skill2");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill3, "Cooldown.Ability.Skill3");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill4, "Cooldown.Ability.Skill4");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill5, "Cooldown.Ability.Skill5");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill6, "Cooldown.Ability.Skill6");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill7, "Cooldown.Ability.Skill7");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill8, "Cooldown.Ability.Skill8");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill9, "Cooldown.Ability.Skill9");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Cooldown_Ability_Skill10, "Cooldown.Ability.Skill10");
 UE_DEFINE_GAMEPLAY_TAG(TAG_CooldownTag, "CooldownTag");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Damage_Type_Physical, "Damage.Type.Physical");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Damage_Type_Magical, "Damage.Type.Magical");

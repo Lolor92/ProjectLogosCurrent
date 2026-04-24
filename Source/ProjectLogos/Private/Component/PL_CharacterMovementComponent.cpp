@@ -130,33 +130,36 @@ void UPL_CharacterMovementComponent::RefreshAbilityRootMotionMode()
 
 float UPL_CharacterMovementComponent::GetMaxSpeed() const
 {
-	const float BaseSpeed = Super::GetMaxSpeed();
-	if (BaseSpeed <= 0.f) return BaseSpeed;
+	float MaxSpeed = Super::GetMaxSpeed();
+	if (MaxSpeed <= 0.f) return MaxSpeed;
 
 	const APawn* PawnOwnerPtr = PawnOwner;
-	if (!PawnOwnerPtr) return BaseSpeed;
+	if (!PawnOwnerPtr) return MaxSpeed;
 
 	if (const APL_BaseCharacter* CharacterOwnerPtr = Cast<APL_BaseCharacter>(PawnOwnerPtr))
 	{
 		if (const UPL_CombatComponent* CombatComponent = CharacterOwnerPtr->GetCombatComponent())
 		{
-			if (CombatComponent->IsBlockingActive()) return BaseSpeed;
+			if (CombatComponent->IsBlockingActive())
+			{
+				return MaxSpeed * BlockingSpeedMultiplier;
+			}
 		}
 	}
 
 	const FVector CurrentAcceleration = Acceleration.GetSafeNormal2D();
-	if (CurrentAcceleration.IsNearlyZero()) return BaseSpeed;
+	if (CurrentAcceleration.IsNearlyZero()) return MaxSpeed;
 
 	const FVector Forward = PawnOwnerPtr->GetActorForwardVector().GetSafeNormal2D();
-	if (Forward.IsNearlyZero()) return BaseSpeed;
+	if (Forward.IsNearlyZero()) return MaxSpeed;
 
 	const float ForwardDot = FVector::DotProduct(Forward, CurrentAcceleration);
 	if (ForwardDot <= BackwardDotThreshold)
 	{
-		return BaseSpeed * BackwardSpeedMultiplier;
+		return MaxSpeed * BackwardSpeedMultiplier;
 	}
 
-	return BaseSpeed;
+	return MaxSpeed;
 }
 
 void UPL_CharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)

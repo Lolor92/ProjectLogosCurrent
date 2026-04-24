@@ -56,6 +56,8 @@ public:
 	void HandleMovementModeChanged(EMovementMode NewMovementMode);
 	bool IsBlockingActive() const;
 	bool IsParryingActive() const;
+	UFUNCTION(BlueprintPure, Category="Combat|Crowd Control")
+	bool IsCrowdControlActive() const;
 	void PlayPredictedHitReaction(const FHitResult& HitResult);
 	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }

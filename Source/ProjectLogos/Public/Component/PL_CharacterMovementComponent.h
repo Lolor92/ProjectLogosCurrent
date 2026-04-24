@@ -37,6 +37,9 @@ private:
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Movement")
+	float BlockingSpeedMultiplier = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Movement")
 	float BackwardSpeedMultiplier = 0.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Movement")

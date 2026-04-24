@@ -66,8 +66,15 @@ protected:
 	UFUNCTION(BlueprintCallable, Category="Ability|Rotation")
 	void RotateAvatarToControllerYawOnActivate() const;
 
+	UFUNCTION(BlueprintCallable, Category="Ability|Rotation")
+	void RotateAvatarToFaceActorOnActivate(AActor* TargetActor) const;
+
 	UPROPERTY(EditDefaultsOnly, Category="Ability|Rotation")
 	bool bRotateToControllerYawOnActivate = false;
+
+	// Allows this ability to break in over another active ability such as stagger or knockdown.
+	UPROPERTY(EditDefaultsOnly, Category="Ability|Interrupt")
+	bool bInterruptOtherAbilitiesOnActivate = false;
 
 	UPROPERTY(EditDefaultsOnly, Category="Ability|Root Motion")
 	bool bStopRootMotionOnCollision = true;
@@ -82,6 +89,7 @@ protected:
 private:
 	// Internal activation checks.
 	bool CanUseAbility(const FGameplayAbilityActorInfo* ActorInfo) const;
+	void InterruptOtherActiveAbilities() const;
 
 	// Collision-driven root motion stop.
 	void BindRootMotionCollisionStop();
