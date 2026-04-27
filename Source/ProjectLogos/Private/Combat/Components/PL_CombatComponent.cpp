@@ -2,7 +2,6 @@
 
 #include "Combat/Components/PL_CombatComponent.h"
 #include "AbilitySystemComponent.h"
-#include "Animation/AnimInstance.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Runtime/PL_CombatHitWindowRuntime.h"
@@ -16,19 +15,19 @@
 UPL_CombatComponent::UPL_CombatComponent(FVTableHelper& Helper)
 	: Super(Helper)
 	, HitWindowRuntime(*this)
-	, LocalHitFeedbackRuntime(*this)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	SetComponentTickEnabled(false);
+
 	TagReactionRuntime = new FPLCombatTagReactionRuntime(*this);
 }
 
 UPL_CombatComponent::UPL_CombatComponent()
 	: HitWindowRuntime(*this)
-	, LocalHitFeedbackRuntime(*this)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	SetComponentTickEnabled(false);
+
 	TagReactionRuntime = new FPLCombatTagReactionRuntime(*this);
 }
 
@@ -108,59 +107,6 @@ bool UPL_CombatComponent::IsCrowdControlActive() const
 	return AbilitySystemComponent
 		&& CrowdControlTag.IsValid()
 		&& AbilitySystemComponent->HasMatchingGameplayTag(CrowdControlTag);
-}
-
-bool UPL_CombatComponent::ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage)
-{
-	AActor* OwnerActor = GetOwner();
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("CombatComponent suppress check. Owner=%s HasAuthority=%s IsLocallyControlled=%s Montage=%s"),
-		*GetNameSafe(OwnerActor),
-		OwnerActor && OwnerActor->HasAuthority() ? TEXT("TRUE") : TEXT("FALSE"),
-		OwningCharacter && OwningCharacter->IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"),
-		*GetNameSafe(Montage));
-
-	if (!Montage || !OwnerActor) return false;
-	if (OwnerActor->HasAuthority()) return false;
-
-	const bool bShouldSuppress = LocalHitFeedbackRuntime.ShouldSuppressPredictedReactionMontageReplay(Montage);
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("CombatComponent suppress result. Owner=%s Montage=%s Result=%s"),
-		*GetNameSafe(OwnerActor),
-		*GetNameSafe(Montage),
-		bShouldSuppress ? TEXT("TRUE") : TEXT("FALSE"));
-
-	return bShouldSuppress;
-}
-
-void UPL_CombatComponent::PlayPredictedHitReaction(const FHitResult& HitResult)
-{
-	AActor* HitActor = HitResult.GetActor();
-	UE_LOG(LogTemp, Warning, TEXT("HitActor: %s"), *GetNameSafe(HitActor));
-
-	APL_BaseCharacter* TargetCharacter = Cast<APL_BaseCharacter>(HitActor);
-
-	if (TargetCharacter->HasAuthority())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Stop: Server should not play predicted local reaction."));
-		return;
-	}
-
-	USkeletalMeshComponent* TargetMesh = TargetCharacter->GetMesh();
-	if (!TargetMesh)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Stop: TargetMesh is null."));
-		return;
-	}
-
-	UAnimInstance* TargetAnimInstance = TargetMesh->GetAnimInstance();
-	if (!TargetAnimInstance)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Stop: TargetAnimInstance is null."));
-		return;
-	}
 }
 
 void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
@@ -319,13 +265,19 @@ void UPL_CombatComponent::TickComponent(
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	HitWindowRuntime.Tick();
-	LocalHitFeedbackRuntime.Tick(DeltaTime);
 }
 
 bool UPL_CombatComponent::BeginHitDetectionWindow(const UAnimNotifyState* NotifyState,
 	USkeletalMeshComponent* MeshComp, FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings)
 {
-	return HitWindowRuntime.BeginHitDetectionWindow(NotifyState, MeshComp, TraceSocketName, HitWindowSettings);
+	const bool bStarted = HitWindowRuntime.BeginHitDetectionWindow(NotifyState, MeshComp, TraceSocketName, HitWindowSettings);
+
+	if (bStarted)
+	{
+		SetComponentTickEnabled(true);
+	}
+
+	return bStarted;
 }
 
 void UPL_CombatComponent::EndHitDetectionWindow(
@@ -333,9 +285,5 @@ void UPL_CombatComponent::EndHitDetectionWindow(
 	USkeletalMeshComponent* MeshComp)
 {
 	HitWindowRuntime.EndHitDetectionWindow(NotifyState, MeshComp);
-
-	if (LocalHitFeedbackRuntime.HasActivePredictedReactionVisuals())
-	{
-		SetComponentTickEnabled(true);
-	}
+	SetComponentTickEnabled(false);
 }

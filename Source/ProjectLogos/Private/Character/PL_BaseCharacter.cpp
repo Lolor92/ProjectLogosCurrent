@@ -5,7 +5,6 @@
 #include "Combat/Components/PL_CombatComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/World.h"
 #include "GAS/Attribute/PL_AttributeSet.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayEffect.h"
@@ -14,7 +13,6 @@
 #include "Player/PL_PlayerState.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "TimerManager.h"
 
 APL_BaseCharacter::APL_BaseCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPL_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -157,91 +155,6 @@ void APL_BaseCharacter::ResetAbilityAnimState()
 	DefaultState.bMovementInputSuppressed = false;
 
 	SetAbilityAnimState(DefaultState);
-}
-
-void APL_BaseCharacter::ApplyHitStop(float Duration, float TimeScale)
-{
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	Duration = FMath::Max(0.f, Duration);
-	if (Duration <= 0.f) return;
-	
-	UCharacterMovementComponent* MovementComp = nullptr;
-	AController* OwnerController = nullptr;
-	EMovementMode PreviousMovementMode = MOVE_None;
-	uint8 PreviousCustomMovementMode = 0;
-	bool bChangedControllerMoveInput = false;
-	
-	if (ACharacter* CharacterOwner = Cast<ACharacter>(GetOwner()))
-	{
-		MovementComp = CharacterOwner->GetCharacterMovement();
-		if (MovementComp)
-		{
-			PreviousMovementMode = MovementComp->MovementMode;
-			PreviousCustomMovementMode = MovementComp->CustomMovementMode;
-
-			// Stop and hard-lock movement during hit-stop.
-			MovementComp->StopMovementImmediately();
-			MovementComp->DisableMovement();
-		}
-
-		OwnerController = CharacterOwner->GetController();
-		if (OwnerController && !OwnerController->IsMoveInputIgnored())
-		{
-			OwnerController->SetIgnoreMoveInput(true);
-			bChangedControllerMoveInput = true;
-		}
-	}
-
-	USkeletalMeshComponent* HitStopMesh = GetMesh();
-	if (!HitStopMesh) return;
-
-	bHasHitStopped = true;
-
-	const float PreviousAnimRate = HitStopMesh->GlobalAnimRateScale;
-	const float NewAnimRate = FMath::Max(0.f, TimeScale);
-	HitStopMesh->GlobalAnimRateScale = NewAnimRate;
-	
-	if (!World)
-	{
-		HitStopMesh->GlobalAnimRateScale = PreviousAnimRate;
-		bHasHitStopped = false;
-		return;
-	}
-
-	FTimerHandle TimerHandle;
-	World->GetTimerManager().SetTimer(
-		TimerHandle,
-		FTimerDelegate::CreateWeakLambda(this, [this, HitStopMesh, PreviousAnimRate, MovementComp, PreviousMovementMode, PreviousCustomMovementMode, OwnerController, bChangedControllerMoveInput]()
-		{
-			if (IsValid(HitStopMesh))
-			{
-				HitStopMesh->GlobalAnimRateScale = PreviousAnimRate;
-			}
-
-			// Restore movement mode so root motion can continue as normal.
-			if (IsValid(MovementComp))
-			{
-				if (PreviousMovementMode == MOVE_Custom)
-				{
-					MovementComp->SetMovementMode(MOVE_Custom, PreviousCustomMovementMode);
-				}
-				else
-				{
-					MovementComp->SetMovementMode(PreviousMovementMode);
-				}
-			}
-
-			if (IsValid(OwnerController) && bChangedControllerMoveInput)
-			{
-				OwnerController->SetIgnoreMoveInput(false);
-			}
-
-			bHasHitStopped = false;
-		}),
-		Duration,
-		false);
 }
 
 void APL_BaseCharacter::RotateToFaceActor(AActor* TargetActor)

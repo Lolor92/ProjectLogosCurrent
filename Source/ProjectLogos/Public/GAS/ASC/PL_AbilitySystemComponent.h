@@ -27,7 +27,4 @@ public:
 
 protected:
 	virtual void OnRep_ReplicatedAnimMontage() override;
-
-private:
-	bool ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage) const;
 };

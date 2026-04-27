@@ -6,7 +6,6 @@
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Character/PL_BaseCharacter.h"
 #include "Combat/Components/PL_CombatComponent.h"
-#include "Combat/Runtime/PL_LocalHitFeedbackRuntime.h"
 #include "Combat/Utilities/PL_CombatFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
@@ -220,7 +219,6 @@ void FPLCombatHitWindowRuntime::ResetActiveHitDebugWindow()
 	HitActorsThisWindow.Reset();
 	ActiveHitDebugWindowDepth = 0;
 	ActiveHitWindowSettings = FPLHitWindowSettings();
-	bHasTriggeredHitStopThisWindow = false;
 
 	CombatComponent.SetComponentTickEnabled(false);
 }
@@ -248,9 +246,6 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	const bool bIsAuthority = CombatComponent.GetOwner() && CombatComponent.GetOwner()->HasAuthority();
 	if (!bIsAuthority)
 	{
-		CombatComponent.GetLocalHitFeedbackRuntime().PlayPredictedHitFeedback(
-			HitActor, HitResult, ActiveHitWindowSettings);
-		
 		return;
 	}
 
@@ -303,14 +298,6 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	}
 
 	ExecuteHitWindowGameplayCues(HitActor, &HitResult, EPLHitWindowCueTriggerTiming::OnHit);
-
-	if (!bHasTriggeredHitStopThisWindow && ActiveHitWindowSettings.HitStopSettings.IsEnabled() && CombatComponent.OwningCharacter)
-	{
-		CombatComponent.OwningCharacter->ApplyHitStop(
-			ActiveHitWindowSettings.HitStopSettings.Duration,
-			ActiveHitWindowSettings.HitStopSettings.TimeScale);
-		bHasTriggeredHitStopThisWindow = true;
-	}
 }
 
 void FPLCombatHitWindowRuntime::ApplyHitWindowTransformEffects(AActor* HitActor, const bool bWasBlocked,
@@ -869,7 +856,6 @@ bool FPLCombatHitWindowRuntime::BeginHitDetectionWindow(const UAnimNotifyState* 
 	ActiveHitDebugSocketName = TraceSocketName;
 	ActiveHitWindowSettings = HitWindowSettings;
 	HitActorsThisWindow.Reset();
-	bHasTriggeredHitStopThisWindow = false;
 
 	ApplyActivationTransformEffects();
 	ExecuteHitWindowGameplayCues(nullptr, nullptr, EPLHitWindowCueTriggerTiming::OnActivation);

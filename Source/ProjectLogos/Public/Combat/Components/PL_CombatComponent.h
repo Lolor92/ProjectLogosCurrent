@@ -8,7 +8,6 @@
 #include "Combat/Data/PL_AbilitySet.h"
 #include "Combat/Data/PL_TagReactionData.h"
 #include "Combat/Runtime/PL_CombatHitWindowRuntime.h"
-#include "Combat/Runtime/PL_LocalHitFeedbackRuntime.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
@@ -58,18 +57,14 @@ public:
 	bool IsParryingActive() const;
 	UFUNCTION(BlueprintPure, Category="Combat|Crowd Control")
 	bool IsCrowdControlActive() const;
-	void PlayPredictedHitReaction(const FHitResult& HitResult);
 	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
 	APL_BaseCharacter* GetOwningCharacter() const { return OwningCharacter; }
 	UAbilitySystemComponent* GetAbilitySystemComponent() const { return AbilitySystemComponent; }
 	UPL_TagReactionData* GetTagReactionData() const { return TagReactionData; }
-	FPLLocalHitFeedbackRuntime& GetLocalHitFeedbackRuntime() { return LocalHitFeedbackRuntime; }
 	const FPL_TagReactionBinding* FindTagReactionBindingForTriggerTag(const FGameplayTag& TriggerTag) const;
 	bool FindReactionAbilityTag(const FGameplayTag& TriggerTag, FGameplayTag& OutAbilityTag) const;
-	UFUNCTION(BlueprintCallable, Category="Combat|Prediction")
-	bool ShouldSuppressPredictedReactionMontageReplay(const UAnimMontage* Montage);
 
 	bool BeginHitDetectionWindow(const UAnimNotifyState* NotifyState, USkeletalMeshComponent* MeshComp,
 		FName TraceSocketName, const FPLHitWindowSettings& HitWindowSettings);
@@ -186,5 +181,4 @@ private:
 	FPLCombatTagReactionRuntime* TagReactionRuntime = nullptr;
 	bool HasSuperArmorAtOrAbove(EPLHitWindowSuperArmorLevel RequiredSuperArmor) const;
 	FPLCombatHitWindowRuntime HitWindowRuntime;
-	FPLLocalHitFeedbackRuntime LocalHitFeedbackRuntime;
 };

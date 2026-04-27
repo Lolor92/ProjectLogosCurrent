@@ -84,7 +84,6 @@ private:
 	int32 ActiveHitDebugWindowDepth = 0;
 
 	FPLHitWindowSettings ActiveHitWindowSettings;
-	bool bHasTriggeredHitStopThisWindow = false;
 
 	TWeakObjectPtr<AActor> LastCombatReferenceActor;
 };

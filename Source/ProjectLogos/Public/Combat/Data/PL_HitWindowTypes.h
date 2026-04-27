@@ -47,26 +47,6 @@ struct FPLHitWindowShapeSettings
 	FRotator LocalRotation = FRotator::ZeroRotator;
 };
 
-USTRUCT(BlueprintType)
-struct FPLHitStopSettings
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
-		meta=(ClampMin="0.0", UIMin="0.0"))
-	float Duration = 0.f;
-
-	// 0.0 = full freeze, 1.0 = no slowdown.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
-		meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
-	float TimeScale = 0.f;
-
-	bool IsEnabled() const
-	{
-		return Duration > 0.f;
-	}
-};
-
 UENUM(BlueprintType)
 enum class EPLHitWindowMoveDirection : uint8
 {
@@ -345,10 +325,6 @@ struct FPLHitWindowSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Shape",
 		meta=(ShowOnlyInnerProperties))
 	FPLHitWindowShapeSettings ShapeSettings;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|HitStop",
-		meta=(ShowOnlyInnerProperties))
-	FPLHitStopSettings HitStopSettings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Movement",
 		meta=(ShowOnlyInnerProperties))

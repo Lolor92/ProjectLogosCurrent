@@ -94,9 +94,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ability|Animation")
 	void ResetAbilityAnimState();
 
-	UFUNCTION(BlueprintCallable, Category="HitStop")
-	void ApplyHitStop(float Duration, float TimeScale = 0.f);
-
 	UFUNCTION(BlueprintCallable, Category="Combat|Rotation")
 	void RotateToFaceActor(AActor* TargetActor);
 	
@@ -115,9 +112,6 @@ protected:
 	// Replicated state.
 	UPROPERTY(ReplicatedUsing=OnRep_AbilityAnimState)
 	FRepAbilityAnimState AbilityAnimState;
-
-	UPROPERTY()
-	bool bHasHitStopped = false;
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetAbilityAnimState(const FRepAbilityAnimState& NewState);
