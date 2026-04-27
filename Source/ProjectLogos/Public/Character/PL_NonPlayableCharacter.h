@@ -50,6 +50,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI|Combat")
 	TSubclassOf<UGameplayAbility> ChooseCombatAbilityForDistance(float DistanceToTarget) const;
 
+	UFUNCTION(BlueprintPure, Category="AI|Combat")
+	bool ShouldBackoffAfterAttack() const;
+
 	UFUNCTION(BlueprintCallable, Category="AI|Targeting")
 	void SetAggroRadius(float NewRadius);
 
@@ -98,6 +101,16 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="AI|Combat", meta=(TitleProperty="AbilityClass"))
 	TArray<FPLWeightedGameplayAbilityEntry> FarRangeAbilities;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="AI|Combat", meta=(ClampMin="0"))
+	int32 AttackCountBeforeBackoff = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="AI|Combat",
+		meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
+	float BackoffChance = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat")
+	int32 SuccessfulAttackCount = 0;
 
 private:
 	UFUNCTION()

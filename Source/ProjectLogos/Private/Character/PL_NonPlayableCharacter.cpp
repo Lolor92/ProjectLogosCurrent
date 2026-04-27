@@ -205,6 +205,16 @@ TSubclassOf<UGameplayAbility> APL_NonPlayableCharacter::ChooseCombatAbilityForDi
 	return ChooseWeightedAbilityFromPool(FarRangeAbilities);
 }
 
+bool APL_NonPlayableCharacter::ShouldBackoffAfterAttack() const
+{
+	if (SuccessfulAttackCount < AttackCountBeforeBackoff)
+	{
+		return false;
+	}
+
+	return FMath::FRand() <= BackoffChance;
+}
+
 APL_BaseCharacter* APL_NonPlayableCharacter::FindBestTargetInAggroRadius()
 {
 	if (HasAuthority() && CachedAggroCandidates.IsEmpty())
