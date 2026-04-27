@@ -79,6 +79,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Ability|Root Motion")
 	bool bStopRootMotionOnCollision = true;
 
+	UPROPERTY(EditDefaultsOnly, Category="Ability|Root Motion", meta=(EditCondition="bStopRootMotionOnCollision", ClampMin="0.0", ClampMax="180.0", UIMin="0.0", UIMax="180.0", Units="Degrees"))
+	float RootMotionCollisionForwardAngleDegrees = 40.f;
+
 	// Combo window control.
 	UFUNCTION(BlueprintCallable, Category="Ability|Combo")
 	void OpenComboWindow();
@@ -94,13 +97,26 @@ private:
 	// Collision-driven root motion stop.
 	void BindRootMotionCollisionStop();
 
+	bool ShouldStopRootMotionFromCapsuleHit(
+		const ACharacter* Character,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		const FHitResult& Hit
+	) const;
+
 	UFUNCTION()
-	void OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
-		FVector NormalImpulse, const FHitResult& Hit);
+	void OnCapsuleHit(
+		UPrimitiveComponent* HitComp,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit
+	);
 
 	void ResetComboWindow();
 
 	FTimerHandle ComboWindowTimerHandle;
+
 	bool bComboWindowOpen = false;
 
 	UPROPERTY()

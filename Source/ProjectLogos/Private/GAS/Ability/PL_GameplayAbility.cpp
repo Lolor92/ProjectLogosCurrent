@@ -7,9 +7,11 @@
 #include "Character/PL_BaseCharacter.h"
 #include "Component/PL_CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 
 UPL_GameplayAbility::UPL_GameplayAbility()
 {
@@ -170,13 +172,100 @@ void UPL_GameplayAbility::InterruptOtherActiveAbilities() const
 	AbilitySystemComponent->CancelAllAbilities(const_cast<ThisClass*>(this));
 }
 
-void UPL_GameplayAbility::OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+bool UPL_GameplayAbility::ShouldStopRootMotionFromCapsuleHit(
+	const ACharacter* Character,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	const FHitResult& Hit
+) const
 {
-	if (!OtherActor || OtherActor == GetAvatarActorFromActorInfo()) return;
+	if (!Character || !OtherActor || OtherActor == Character)
+	{
+		return false;
+	}
+
+	// Keep this focused on character/pawn body contact.
+	// This prevents random side brushes against non-pawn props from killing root motion.
+	if (!OtherActor->IsA<APawn>())
+	{
+		return false;
+	}
+
+	// If we have a component, prefer capsule/mesh body contact.
+	// If OtherComp is null, still allow the angle test as fallback.
+	if (OtherComp)
+	{
+		const bool bIsCapsule = OtherComp->IsA<UCapsuleComponent>();
+		const bool bIsMesh = OtherComp->IsA<USkeletalMeshComponent>();
+
+		if (!bIsCapsule && !bIsMesh)
+		{
+			return false;
+		}
+	}
+
+	FVector Forward = Character->GetActorForwardVector();
+	Forward.Z = 0.f;
+
+	if (!Forward.Normalize())
+	{
+		return false;
+	}
+
+	const FVector Start = Character->GetActorLocation();
+
+	// Normal blocking hits usually have a good impact point.
+	// Initial overlaps / penetration can give a bad point, so fall back to actor location.
+	FVector HitPoint = Hit.ImpactPoint;
+
+	if (Hit.bStartPenetrating || HitPoint.IsNearlyZero())
+	{
+		HitPoint = OtherActor->GetActorLocation();
+	}
+
+	FVector ToHit = HitPoint - Start;
+	ToHit.Z = 0.f;
+
+	if (!ToHit.Normalize())
+	{
+		return false;
+	}
+
+	const float ClampedAngleDegrees = FMath::Clamp(
+		RootMotionCollisionForwardAngleDegrees,
+		0.f,
+		180.f
+	);
+
+	const float MinForwardDot = FMath::Cos(FMath::DegreesToRadians(ClampedAngleDegrees));
+	const float ForwardDot = FVector::DotProduct(Forward, ToHit);
+
+	return ForwardDot >= MinForwardDot;
+}
+
+void UPL_GameplayAbility::OnCapsuleHit(
+	UPrimitiveComponent* HitComp,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	FVector NormalImpulse,
+	const FHitResult& Hit
+)
+{
+	if (!OtherActor || OtherActor == GetAvatarActorFromActorInfo())
+	{
+		return;
+	}
 
 	APL_BaseCharacter* Character = Cast<APL_BaseCharacter>(GetAvatarActorFromActorInfo());
-	if (!Character) return;
+	if (!Character)
+	{
+		return;
+	}
+
+	if (!ShouldStopRootMotionFromCapsuleHit(Character, OtherActor, OtherComp, Hit))
+	{
+		return;
+	}
 
 	bRootMotionStoppedByCollision = true;
 
@@ -200,8 +289,11 @@ void UPL_GameplayAbility::OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* Oth
 
 		if (AnimInstance && MontageLength > 0.f)
 		{
-			const float Percent = (AnimInstance->Montage_GetPosition(ActiveMontage) / MontageLength) * 100.f;
-			AbilityAnimState.bMovementInputSuppressed = Percent < MontageLockout.MontageProgressBeforeInterrupt;
+			const float Percent =
+				(AnimInstance->Montage_GetPosition(ActiveMontage) / MontageLength) * 100.f;
+
+			AbilityAnimState.bMovementInputSuppressed =
+				Percent < MontageLockout.MontageProgressBeforeInterrupt;
 		}
 	}
 
