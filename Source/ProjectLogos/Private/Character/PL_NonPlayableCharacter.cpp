@@ -1,12 +1,12 @@
 ﻿// Copyright ProjectLogos
 
-#include "Character/PL_NonePlayableCharacter.h"
+#include "Character/PL_NonPlayableCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Components/SphereComponent.h"
 #include "Combat/Components/PL_CombatComponent.h"
 #include "GAS/Attribute/PL_AttributeSet.h"
 
-APL_NonePlayableCharacter::APL_NonePlayableCharacter()
+APL_NonPlayableCharacter::APL_NonPlayableCharacter()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -27,7 +27,7 @@ APL_NonePlayableCharacter::APL_NonePlayableCharacter()
 	AttributeSet = CreateDefaultSubobject<UPL_AttributeSet>("AttributeSet");
 }
 
-void APL_NonePlayableCharacter::BeginPlay()
+void APL_NonPlayableCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -51,7 +51,7 @@ void APL_NonePlayableCharacter::BeginPlay()
 	InitAbilityActorInfo();
 }
 
-void APL_NonePlayableCharacter::InitAbilityActorInfo()
+void APL_NonPlayableCharacter::InitAbilityActorInfo()
 {
 	if (!AbilitySystemComponent) return;
 
@@ -65,7 +65,7 @@ void APL_NonePlayableCharacter::InitAbilityActorInfo()
 	}
 }
 
-float APL_NonePlayableCharacter::ChooseDesiredCombatRange() const
+float APL_NonPlayableCharacter::ChooseDesiredCombatRange() const
 {
 	const float MinRange = FMath::Min(DesiredCombatRangeMin, DesiredCombatRangeMax);
 	const float MaxRange = FMath::Max(DesiredCombatRangeMin, DesiredCombatRangeMax);
@@ -104,7 +104,7 @@ float APL_NonePlayableCharacter::ChooseDesiredCombatRange() const
 	return FMath::Lerp(MinRange, MaxRange, BlendedAlpha);
 }
 
-TSubclassOf<UGameplayAbility> APL_NonePlayableCharacter::ChooseCombatAbilityForDistance(const float DistanceToTarget) const
+TSubclassOf<UGameplayAbility> APL_NonPlayableCharacter::ChooseCombatAbilityForDistance(const float DistanceToTarget) const
 {
 	if (CombatComponent && CombatComponent->IsCrowdControlActive())
 	{
@@ -205,7 +205,7 @@ TSubclassOf<UGameplayAbility> APL_NonePlayableCharacter::ChooseCombatAbilityForD
 	return ChooseWeightedAbilityFromPool(FarRangeAbilities);
 }
 
-APL_BaseCharacter* APL_NonePlayableCharacter::FindBestTargetInAggroRadius()
+APL_BaseCharacter* APL_NonPlayableCharacter::FindBestTargetInAggroRadius()
 {
 	if (HasAuthority() && CachedAggroCandidates.IsEmpty())
 	{
@@ -252,7 +252,7 @@ APL_BaseCharacter* APL_NonePlayableCharacter::FindBestTargetInAggroRadius()
 	return BestTarget;
 }
 
-void APL_NonePlayableCharacter::SetAggroRadius(const float NewRadius)
+void APL_NonPlayableCharacter::SetAggroRadius(const float NewRadius)
 {
 	AggroRadius = FMath::Max(0.f, NewRadius);
 
@@ -262,7 +262,7 @@ void APL_NonePlayableCharacter::SetAggroRadius(const float NewRadius)
 	}
 }
 
-int32 APL_NonePlayableCharacter::GetCachedAggroCandidateCount() const
+int32 APL_NonPlayableCharacter::GetCachedAggroCandidateCount() const
 {
 	int32 Count = 0;
 
@@ -277,19 +277,19 @@ int32 APL_NonePlayableCharacter::GetCachedAggroCandidateCount() const
 	return Count;
 }
 
-void APL_NonePlayableCharacter::HandleAggroSensorBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+void APL_NonPlayableCharacter::HandleAggroSensorBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	AddAggroCandidate(Cast<APL_BaseCharacter>(OtherActor));
 }
 
-void APL_NonePlayableCharacter::HandleAggroSensorEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+void APL_NonPlayableCharacter::HandleAggroSensorEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
 	RemoveAggroCandidate(Cast<APL_BaseCharacter>(OtherActor));
 }
 
-bool APL_NonePlayableCharacter::IsValidAggroCandidate(const APL_BaseCharacter* Candidate) const
+bool APL_NonPlayableCharacter::IsValidAggroCandidate(const APL_BaseCharacter* Candidate) const
 {
 	if (!Candidate || Candidate == this)
 	{
@@ -314,7 +314,7 @@ bool APL_NonePlayableCharacter::IsValidAggroCandidate(const APL_BaseCharacter* C
 	return true;
 }
 
-TSubclassOf<UGameplayAbility> APL_NonePlayableCharacter::ChooseWeightedAbilityFromPool(
+TSubclassOf<UGameplayAbility> APL_NonPlayableCharacter::ChooseWeightedAbilityFromPool(
 	const TArray<FPLWeightedGameplayAbilityEntry>& AbilityPool) const
 {
 	float TotalWeight = 0.f;
@@ -360,7 +360,7 @@ TSubclassOf<UGameplayAbility> APL_NonePlayableCharacter::ChooseWeightedAbilityFr
 	return nullptr;
 }
 
-void APL_NonePlayableCharacter::RefreshAggroCandidatesFromSensor()
+void APL_NonPlayableCharacter::RefreshAggroCandidatesFromSensor()
 {
 	if (!AggroSensor || !HasAuthority())
 	{
@@ -378,7 +378,7 @@ void APL_NonePlayableCharacter::RefreshAggroCandidatesFromSensor()
 	}
 }
 
-void APL_NonePlayableCharacter::AddAggroCandidate(APL_BaseCharacter* Candidate)
+void APL_NonPlayableCharacter::AddAggroCandidate(APL_BaseCharacter* Candidate)
 {
 	if (!IsValidAggroCandidate(Candidate))
 	{
@@ -388,7 +388,7 @@ void APL_NonePlayableCharacter::AddAggroCandidate(APL_BaseCharacter* Candidate)
 	CachedAggroCandidates.Add(Candidate);
 }
 
-void APL_NonePlayableCharacter::RemoveAggroCandidate(APL_BaseCharacter* Candidate)
+void APL_NonPlayableCharacter::RemoveAggroCandidate(APL_BaseCharacter* Candidate)
 {
 	if (!Candidate)
 	{

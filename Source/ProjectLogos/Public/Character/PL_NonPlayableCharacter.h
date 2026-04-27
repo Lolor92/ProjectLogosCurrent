@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "PL_BaseCharacter.h"
-#include "PL_NonePlayableCharacter.generated.h"
+#include "PL_NonPlayableCharacter.generated.h"
 
 class UGameplayAbility;
 class USphereComponent;
@@ -32,12 +32,12 @@ struct FPLWeightedGameplayAbilityEntry
 };
 
 UCLASS()
-class PROJECTLOGOS_API APL_NonePlayableCharacter : public APL_BaseCharacter
+class PROJECTLOGOS_API APL_NonPlayableCharacter : public APL_BaseCharacter
 {
 	GENERATED_BODY()
 
 public:
-	APL_NonePlayableCharacter();
+	APL_NonPlayableCharacter();
 	
 	virtual void BeginPlay() override;
 
