@@ -284,6 +284,21 @@ struct FPLHitWindowGameplayEffect
 };
 
 USTRUCT(BlueprintType)
+struct FPLHitWindowDelayedGameplayEffect
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Delayed Effects")
+	TSubclassOf<UGameplayEffect> GameplayEffectClass = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Delayed Effects", meta=(ClampMin="0.0"))
+	float EffectLevel = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Delayed Effects", meta=(ClampMin="0.0", UIMin="0.0", Units="Seconds"))
+	float DelaySeconds = 0.1f;
+};
+
+USTRUCT(BlueprintType)
 struct FPLHitWindowDamageSettings
 {
 	GENERATED_BODY()
@@ -304,8 +319,12 @@ struct FPLHitWindowDamageSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
 	bool bApplyDamageWhenDodged = false;
 
+	// Damage is allowed through super armor only if the defender's super armor level
+	// is below or equal to this value.
+	// Example:
+	// SuperArmor1 / SuperArmor2 take damage, SuperArmor3 ignores damage.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
-	bool bApplyDamageWhenSuperArmored = true;
+	EPLHitWindowSuperArmorLevel MaxSuperArmorLevelThatTakesDamage = EPLHitWindowSuperArmorLevel::SuperArmor2;
 };
 
 USTRUCT(BlueprintType)
@@ -372,6 +391,12 @@ struct FPLHitWindowSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
 		meta=(TitleProperty="GameplayEffectClass", DisplayName="Reaction Gameplay Effects to Apply"))
 	TArray<FPLHitWindowGameplayEffect> GameplayEffectsToApply;
+
+	// Keep GameplayEffectsToApply as your immediate reaction effects.
+	// Stagger / knockdown / pushback trigger effects go there.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
+		meta=(TitleProperty="GameplayEffectClass", DisplayName="Delayed Reaction Gameplay Effects to Apply"))
+	TArray<FPLHitWindowDelayedGameplayEffect> DelayedGameplayEffectsToApply;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Gameplay Cues",
 		meta=(TitleProperty="CueTag"))

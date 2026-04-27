@@ -109,6 +109,31 @@ bool UPL_CombatComponent::IsCrowdControlActive() const
 		&& AbilitySystemComponent->HasMatchingGameplayTag(CrowdControlTag);
 }
 
+EPLHitWindowSuperArmorLevel UPL_CombatComponent::GetCurrentSuperArmorLevel() const
+{
+	if (!AbilitySystemComponent)
+	{
+		return EPLHitWindowSuperArmorLevel::None;
+	}
+
+	if (SuperArmorTag3.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SuperArmorTag3))
+	{
+		return EPLHitWindowSuperArmorLevel::SuperArmor3;
+	}
+
+	if (SuperArmorTag2.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SuperArmorTag2))
+	{
+		return EPLHitWindowSuperArmorLevel::SuperArmor2;
+	}
+
+	if (SuperArmorTag1.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SuperArmorTag1))
+	{
+		return EPLHitWindowSuperArmorLevel::SuperArmor1;
+	}
+
+	return EPLHitWindowSuperArmorLevel::None;
+}
+
 void UPL_CombatComponent::SetLastCombatReferenceActor(AActor* InActor)
 {
 	HitWindowRuntime.SetLastCombatReferenceActor(InActor);
@@ -150,31 +175,12 @@ bool UPL_CombatComponent::FindReactionAbilityTag(const FGameplayTag& TriggerTag,
 
 bool UPL_CombatComponent::HasSuperArmorAtOrAbove(const EPLHitWindowSuperArmorLevel RequiredSuperArmor) const
 {
-	if (!AbilitySystemComponent)
+	if (RequiredSuperArmor == EPLHitWindowSuperArmorLevel::None)
 	{
 		return false;
 	}
 
-	auto HasConfiguredTag = [this](const FGameplayTag& Tag)
-	{
-		return Tag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(Tag);
-	};
-
-	switch (RequiredSuperArmor)
-	{
-	case EPLHitWindowSuperArmorLevel::SuperArmor1:
-		return HasConfiguredTag(SuperArmorTag1) || HasConfiguredTag(SuperArmorTag2) || HasConfiguredTag(SuperArmorTag3);
-
-	case EPLHitWindowSuperArmorLevel::SuperArmor2:
-		return HasConfiguredTag(SuperArmorTag2) || HasConfiguredTag(SuperArmorTag3);
-
-	case EPLHitWindowSuperArmorLevel::SuperArmor3:
-		return HasConfiguredTag(SuperArmorTag3);
-
-	case EPLHitWindowSuperArmorLevel::None:
-	default:
-		return false;
-	}
+	return GetCurrentSuperArmorLevel() >= RequiredSuperArmor;
 }
 
 void UPL_CombatComponent::GrantDefaultAbilities()

@@ -40,11 +40,24 @@ private:
 		const FHitResult& HitResult,
 		const TArray<FPLHitWindowGameplayEffect>& GameplayEffects
 	) const;
+	void ScheduleDelayedHitWindowGameplayEffects(
+		AActor* HitActor,
+		const FHitResult& HitResult,
+		const TArray<FPLHitWindowDelayedGameplayEffect>& DelayedGameplayEffects
+	) const;
+	static void ApplyDelayedGameplayEffectToTarget(
+		TWeakObjectPtr<UAbilitySystemComponent> SourceASC,
+		TWeakObjectPtr<AActor> SourceActor,
+		TWeakObjectPtr<AActor> TargetActor,
+		const FHitResult HitResult,
+		TSubclassOf<UGameplayEffect> GameplayEffectClass,
+		float EffectLevel
+	);
 	bool ShouldApplyDamageGameplayEffects(
 		bool bWasBlocked,
 		bool bWasParried,
 		bool bWasDodged,
-		bool bHasSuperArmor
+		EPLHitWindowSuperArmorLevel TargetSuperArmorLevel
 	) const;
 	void ApplyActivationTransformEffects() const;
 	void ApplyHitWindowTransformEffects(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
@@ -80,6 +93,7 @@ private:
 	static bool DoesTransformTimingMatch(EPLHitWindowTransformTriggerTiming ConfiguredTiming,
 		EPLHitWindowTransformTriggerTiming InvocationTiming);
 	static UPL_CombatComponent* FindCombatComponent(AActor* Actor);
+	EPLHitWindowSuperArmorLevel GetTargetSuperArmorLevel(AActor* HitActor) const;
 
 	UPL_CombatComponent& CombatComponent;
 

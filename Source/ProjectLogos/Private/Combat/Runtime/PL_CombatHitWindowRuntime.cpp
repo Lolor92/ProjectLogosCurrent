@@ -9,10 +9,12 @@
 #include "Combat/Utilities/PL_CombatFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
 #include "Tag/PL_NativeTags.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPLCombatHitDetectionRuntime, Log, All);
 
@@ -257,12 +259,13 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	const bool bWasParried = bWasBlocked && IsAttackParried(HitActor);
 	const bool bWasDodged = IsAttackDodged(HitActor);
 	const bool bHasSuperArmor = HasRequiredSuperArmor(HitActor);
+	const EPLHitWindowSuperArmorLevel TargetSuperArmorLevel = GetTargetSuperArmorLevel(HitActor);
 
 	const bool bHasDefenseOutcome = bWasBlocked || bWasParried || bWasDodged || bHasSuperArmor;
 
 	ApplyHitWindowTransformEffects(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
 
-	if (ShouldApplyDamageGameplayEffects(bWasBlocked, bWasParried, bWasDodged, bHasSuperArmor))
+	if (ShouldApplyDamageGameplayEffects(bWasBlocked, bWasParried, bWasDodged, TargetSuperArmorLevel))
 	{
 		ApplyHitWindowGameplayEffectListToTarget(
 			HitActor,
@@ -301,6 +304,14 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 		HitActor,
 		HitResult,
 		ActiveHitWindowSettings.GameplayEffectsToApply
+	);
+
+	// Delayed reaction effects also only happen on a clean hit.
+	// Block / parry / dodge / super armor prevent these because the function returned above.
+	ScheduleDelayedHitWindowGameplayEffects(
+		HitActor,
+		HitResult,
+		ActiveHitWindowSettings.DelayedGameplayEffectsToApply
 	);
 
 	ExecuteHitWindowGameplayCues(HitActor, &HitResult, EPLHitWindowCueTriggerTiming::OnHit);
@@ -362,11 +373,116 @@ void FPLCombatHitWindowRuntime::ApplyHitWindowGameplayEffectListToTarget(
 	}
 }
 
+void FPLCombatHitWindowRuntime::ScheduleDelayedHitWindowGameplayEffects(
+	AActor* HitActor,
+	const FHitResult& HitResult,
+	const TArray<FPLHitWindowDelayedGameplayEffect>& DelayedGameplayEffects
+) const
+{
+	if (!CombatComponent.AbilitySystemComponent || !HitActor || HitActor == CombatComponent.GetOwner())
+	{
+		return;
+	}
+
+	if (DelayedGameplayEffects.IsEmpty())
+	{
+		return;
+	}
+
+	UWorld* World = CombatComponent.GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TWeakObjectPtr<UAbilitySystemComponent> SourceASC = CombatComponent.AbilitySystemComponent;
+	TWeakObjectPtr<AActor> SourceActor = CombatComponent.GetOwner();
+	TWeakObjectPtr<AActor> TargetActor = HitActor;
+
+	for (const FPLHitWindowDelayedGameplayEffect& DelayedEffect : DelayedGameplayEffects)
+	{
+		if (!DelayedEffect.GameplayEffectClass)
+		{
+			continue;
+		}
+
+		const float DelaySeconds = FMath::Max(0.f, DelayedEffect.DelaySeconds);
+
+		FTimerDelegate TimerDelegate;
+		TimerDelegate.BindStatic(
+			&FPLCombatHitWindowRuntime::ApplyDelayedGameplayEffectToTarget,
+			SourceASC,
+			SourceActor,
+			TargetActor,
+			HitResult,
+			DelayedEffect.GameplayEffectClass,
+			DelayedEffect.EffectLevel
+		);
+
+		if (DelaySeconds <= 0.f)
+		{
+			World->GetTimerManager().SetTimerForNextTick(TimerDelegate);
+			continue;
+		}
+
+		FTimerHandle TimerHandle;
+		World->GetTimerManager().SetTimer(
+			TimerHandle,
+			TimerDelegate,
+			DelaySeconds,
+			false
+		);
+	}
+}
+
+void FPLCombatHitWindowRuntime::ApplyDelayedGameplayEffectToTarget(
+	TWeakObjectPtr<UAbilitySystemComponent> SourceASC,
+	TWeakObjectPtr<AActor> SourceActor,
+	TWeakObjectPtr<AActor> TargetActor,
+	const FHitResult HitResult,
+	TSubclassOf<UGameplayEffect> GameplayEffectClass,
+	const float EffectLevel
+)
+{
+	if (!SourceASC.IsValid() || !SourceActor.IsValid() || !TargetActor.IsValid() || !GameplayEffectClass)
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* TargetASC =
+		UPL_CombatFunctionLibrary::GetAbilitySystemComponent(TargetActor.Get());
+
+	if (!TargetASC)
+	{
+		return;
+	}
+
+	FGameplayEffectContextHandle ContextHandle = SourceASC->MakeEffectContext();
+	ContextHandle.AddHitResult(HitResult);
+	ContextHandle.AddInstigator(SourceActor.Get(), SourceActor.Get());
+
+	const FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(
+		GameplayEffectClass,
+		EffectLevel,
+		ContextHandle
+	);
+
+	if (!SpecHandle.IsValid())
+	{
+		return;
+	}
+
+	SourceASC->ApplyGameplayEffectSpecToTarget(
+		*SpecHandle.Data.Get(),
+		TargetASC
+	);
+}
+
 bool FPLCombatHitWindowRuntime::ShouldApplyDamageGameplayEffects(
 	const bool bWasBlocked,
 	const bool bWasParried,
 	const bool bWasDodged,
-	const bool bHasSuperArmor
+	const EPLHitWindowSuperArmorLevel TargetSuperArmorLevel
 ) const
 {
 	const FPLHitWindowDamageSettings& DamageSettings = ActiveHitWindowSettings.DamageSettings;
@@ -391,7 +507,7 @@ bool FPLCombatHitWindowRuntime::ShouldApplyDamageGameplayEffects(
 		return false;
 	}
 
-	if (bHasSuperArmor && !DamageSettings.bApplyDamageWhenSuperArmored)
+	if (TargetSuperArmorLevel > DamageSettings.MaxSuperArmorLevelThatTakesDamage)
 	{
 		return false;
 	}
@@ -722,6 +838,16 @@ bool FPLCombatHitWindowRuntime::HasRequiredSuperArmor(AActor* HitActor) const
 
 	const UPL_CombatComponent* TargetCombatComponent = FindCombatComponent(HitActor);
 	return TargetCombatComponent && TargetCombatComponent->HasSuperArmorAtOrAbove(RequiredSuperArmor);
+}
+
+EPLHitWindowSuperArmorLevel FPLCombatHitWindowRuntime::GetTargetSuperArmorLevel(AActor* HitActor) const
+{
+	if (const UPL_CombatComponent* TargetCombatComponent = FindCombatComponent(HitActor))
+	{
+		return TargetCombatComponent->GetCurrentSuperArmorLevel();
+	}
+
+	return EPLHitWindowSuperArmorLevel::None;
 }
 
 void FPLCombatHitWindowRuntime::ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,

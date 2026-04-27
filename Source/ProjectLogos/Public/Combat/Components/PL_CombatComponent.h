@@ -57,6 +57,8 @@ public:
 	bool IsParryingActive() const;
 	UFUNCTION(BlueprintPure, Category="Combat|Crowd Control")
 	bool IsCrowdControlActive() const;
+	UFUNCTION(BlueprintPure, Category="Combat|Defense")
+	EPLHitWindowSuperArmorLevel GetCurrentSuperArmorLevel() const;
 	void SetLastCombatReferenceActor(AActor* InActor);
 	const FGameplayTag& GetBlockingTag() const { return BlockingTag; }
 	const FGameplayTag& GetParryingTag() const { return ParryingTag; }
