@@ -284,6 +284,31 @@ struct FPLHitWindowGameplayEffect
 };
 
 USTRUCT(BlueprintType)
+struct FPLHitWindowDamageSettings
+{
+	GENERATED_BODY()
+
+	// Damage-only effects. Put GE_Damage, GE_Damage_Light, GE_Damage_Heavy, etc. here.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage", meta=(TitleProperty="GameplayEffectClass"))
+	TArray<FPLHitWindowGameplayEffect> DamageGameplayEffectsToApply;
+
+	// Normal fighting-game style defaults:
+	// Block / parry / dodge stop damage.
+	// Super armor can still take damage while ignoring reaction.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
+	bool bApplyDamageWhenBlocked = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
+	bool bApplyDamageWhenParried = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
+	bool bApplyDamageWhenDodged = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage")
+	bool bApplyDamageWhenSuperArmored = true;
+};
+
+USTRUCT(BlueprintType)
 struct FPLHitWindowGameplayCue
 {
 	GENERATED_BODY()
@@ -338,8 +363,14 @@ struct FPLHitWindowSettings
 		meta=(ShowOnlyInnerProperties))
 	FPLHitWindowDefenseSettings DefenseSettings;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Damage",
+		meta=(ShowOnlyInnerProperties))
+	FPLHitWindowDamageSettings DamageSettings;
+
+	// Keep the variable name for asset compatibility.
+	// Treat this as reaction/stagger/knockdown/pushback effects, not damage.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Effects",
-		meta=(TitleProperty="GameplayEffectClass"))
+		meta=(TitleProperty="GameplayEffectClass", DisplayName="Reaction Gameplay Effects to Apply"))
 	TArray<FPLHitWindowGameplayEffect> GameplayEffectsToApply;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hit Detection|Gameplay Cues",

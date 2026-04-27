@@ -35,6 +35,17 @@ private:
 		const FPLHitWindowShapeSettings& HitShapeSettings) const;
 
 	void TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult);
+	void ApplyHitWindowGameplayEffectListToTarget(
+		AActor* HitActor,
+		const FHitResult& HitResult,
+		const TArray<FPLHitWindowGameplayEffect>& GameplayEffects
+	) const;
+	bool ShouldApplyDamageGameplayEffects(
+		bool bWasBlocked,
+		bool bWasParried,
+		bool bWasDodged,
+		bool bHasSuperArmor
+	) const;
 	void ApplyActivationTransformEffects() const;
 	void ApplyHitWindowTransformEffects(AActor* HitActor, bool bWasBlocked, bool bWasDodged, bool bHasSuperArmor) const;
 	void ApplyHitWindowMovement(AActor* HitActor, EPLHitWindowTransformTriggerTiming InvocationTiming,

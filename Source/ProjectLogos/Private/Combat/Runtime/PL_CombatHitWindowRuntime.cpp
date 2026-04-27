@@ -241,9 +241,13 @@ FTransform FPLCombatHitWindowRuntime::GetHitTraceWorldTransform(USkeletalMeshCom
 
 void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, const FHitResult& HitResult)
 {
-	if (!CombatComponent.AbilitySystemComponent || !HitActor || HitActor == CombatComponent.GetOwner()) return;
+	if (!CombatComponent.AbilitySystemComponent || !HitActor || HitActor == CombatComponent.GetOwner())
+	{
+		return;
+	}
 
 	const bool bIsAuthority = CombatComponent.GetOwner() && CombatComponent.GetOwner()->HasAuthority();
+
 	if (!bIsAuthority)
 	{
 		return;
@@ -253,9 +257,19 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 	const bool bWasParried = bWasBlocked && IsAttackParried(HitActor);
 	const bool bWasDodged = IsAttackDodged(HitActor);
 	const bool bHasSuperArmor = HasRequiredSuperArmor(HitActor);
+
 	const bool bHasDefenseOutcome = bWasBlocked || bWasParried || bWasDodged || bHasSuperArmor;
 
 	ApplyHitWindowTransformEffects(HitActor, bWasBlocked, bWasDodged, bHasSuperArmor);
+
+	if (ShouldApplyDamageGameplayEffects(bWasBlocked, bWasParried, bWasDodged, bHasSuperArmor))
+	{
+		ApplyHitWindowGameplayEffectListToTarget(
+			HitActor,
+			HitResult,
+			ActiveHitWindowSettings.DamageSettings.DamageGameplayEffectsToApply
+		);
+	}
 
 	if (bHasDefenseOutcome)
 	{
@@ -269,35 +283,120 @@ void FPLCombatHitWindowRuntime::TryApplyHitGameplayEffects(AActor* HitActor, con
 			}
 		}
 
-		ApplyDefenseGameplayEffects(HitActor, HitResult, bWasBlocked, bWasParried, bWasDodged, bHasSuperArmor);
+		ApplyDefenseGameplayEffects(
+			HitActor,
+			HitResult,
+			bWasBlocked,
+			bWasParried,
+			bWasDodged,
+			bHasSuperArmor
+		);
+
 		return;
 	}
 
-	if (!ActiveHitWindowSettings.GameplayEffectsToApply.IsEmpty() && bIsAuthority)
-	{
-		if (UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor))
-		{
-			FGameplayEffectContextHandle ContextHandle = CombatComponent.AbilitySystemComponent->MakeEffectContext();
-			ContextHandle.AddSourceObject(&CombatComponent);
-			ContextHandle.AddHitResult(HitResult);
-
-			for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : ActiveHitWindowSettings.GameplayEffectsToApply)
-			{
-				if (!GameplayEffectToApply.GameplayEffectClass) continue;
-
-				const FGameplayEffectSpecHandle SpecHandle = CombatComponent.AbilitySystemComponent->MakeOutgoingSpec(
-					GameplayEffectToApply.GameplayEffectClass,
-					GameplayEffectToApply.EffectLevel,
-					ContextHandle);
-
-				if (!SpecHandle.IsValid()) continue;
-
-				CombatComponent.AbilitySystemComponent->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-			}
-		}
-	}
+	// Reaction effects only happen when the hit actually lands cleanly.
+	// Put stagger/knockdown/pushback trigger effects here, not damage.
+	ApplyHitWindowGameplayEffectListToTarget(
+		HitActor,
+		HitResult,
+		ActiveHitWindowSettings.GameplayEffectsToApply
+	);
 
 	ExecuteHitWindowGameplayCues(HitActor, &HitResult, EPLHitWindowCueTriggerTiming::OnHit);
+}
+
+void FPLCombatHitWindowRuntime::ApplyHitWindowGameplayEffectListToTarget(
+	AActor* HitActor,
+	const FHitResult& HitResult,
+	const TArray<FPLHitWindowGameplayEffect>& GameplayEffects
+) const
+{
+	if (!CombatComponent.AbilitySystemComponent || !HitActor || HitActor == CombatComponent.GetOwner())
+	{
+		return;
+	}
+
+	if (GameplayEffects.IsEmpty())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* TargetASC = UPL_CombatFunctionLibrary::GetAbilitySystemComponent(HitActor);
+	if (!TargetASC)
+	{
+		return;
+	}
+
+	FGameplayEffectContextHandle ContextHandle = CombatComponent.AbilitySystemComponent->MakeEffectContext();
+	ContextHandle.AddSourceObject(&CombatComponent);
+	ContextHandle.AddHitResult(HitResult);
+
+	if (AActor* OwnerActor = CombatComponent.GetOwner())
+	{
+		ContextHandle.AddInstigator(OwnerActor, OwnerActor);
+	}
+
+	for (const FPLHitWindowGameplayEffect& GameplayEffectToApply : GameplayEffects)
+	{
+		if (!GameplayEffectToApply.GameplayEffectClass)
+		{
+			continue;
+		}
+
+		const FGameplayEffectSpecHandle SpecHandle = CombatComponent.AbilitySystemComponent->MakeOutgoingSpec(
+			GameplayEffectToApply.GameplayEffectClass,
+			GameplayEffectToApply.EffectLevel,
+			ContextHandle
+		);
+
+		if (!SpecHandle.IsValid())
+		{
+			continue;
+		}
+
+		CombatComponent.AbilitySystemComponent->ApplyGameplayEffectSpecToTarget(
+			*SpecHandle.Data.Get(),
+			TargetASC
+		);
+	}
+}
+
+bool FPLCombatHitWindowRuntime::ShouldApplyDamageGameplayEffects(
+	const bool bWasBlocked,
+	const bool bWasParried,
+	const bool bWasDodged,
+	const bool bHasSuperArmor
+) const
+{
+	const FPLHitWindowDamageSettings& DamageSettings = ActiveHitWindowSettings.DamageSettings;
+
+	if (DamageSettings.DamageGameplayEffectsToApply.IsEmpty())
+	{
+		return false;
+	}
+
+	if (bWasParried && !DamageSettings.bApplyDamageWhenParried)
+	{
+		return false;
+	}
+
+	if (bWasBlocked && !DamageSettings.bApplyDamageWhenBlocked)
+	{
+		return false;
+	}
+
+	if (bWasDodged && !DamageSettings.bApplyDamageWhenDodged)
+	{
+		return false;
+	}
+
+	if (bHasSuperArmor && !DamageSettings.bApplyDamageWhenSuperArmored)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 void FPLCombatHitWindowRuntime::ApplyHitWindowTransformEffects(AActor* HitActor, const bool bWasBlocked,
@@ -628,15 +727,16 @@ bool FPLCombatHitWindowRuntime::HasRequiredSuperArmor(AActor* HitActor) const
 void FPLCombatHitWindowRuntime::ApplyDefenseGameplayEffects(AActor* HitActor, const FHitResult& HitResult,
 	const bool bWasBlocked, const bool bWasParried, const bool bWasDodged, const bool bHasSuperArmor) const
 {
+	if (bWasBlocked)
+	{
+		ApplyGameplayEffectToActor(CombatComponent.GetOwner(), CombatComponent.AttackerBlockedEffectClass, 1.f, &HitResult);
+		ApplyGameplayEffectToActor(HitActor, CombatComponent.DefenderBlockedEffectClass, 1.f, &HitResult);
+	}
+
 	if (bWasParried)
 	{
 		ApplyGameplayEffectToActor(CombatComponent.GetOwner(), CombatComponent.AttackerParriedEffectClass, 1.f, &HitResult);
 		ApplyGameplayEffectToActor(HitActor, CombatComponent.DefenderParrySuccessEffectClass, 1.f, &HitResult);
-	}
-	else if (bWasBlocked)
-	{
-		ApplyGameplayEffectToActor(CombatComponent.GetOwner(), CombatComponent.AttackerBlockedEffectClass, 1.f, &HitResult);
-		ApplyGameplayEffectToActor(HitActor, CombatComponent.DefenderBlockedEffectClass, 1.f, &HitResult);
 	}
 
 	if (bWasDodged)
