@@ -4,10 +4,13 @@
 #include "AbilitySystemComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Combat/Utilities/PL_CombatFunctionLibrary.h"
+#include "Component/PL_CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -259,8 +262,26 @@ void UPL_InputComponent::BindActionsFromConfig()
 		// Axis-like actions stay local instead of forwarding as gameplay ability input.
 		if (InputActionRow.InputTag.MatchesTagExact(TAG_Input_Move))
 		{
-			InjectedEnhancedInputComponent->BindAction(InputActionRow.InputAction, ETriggerEvent::Triggered,
-				this, &UPL_InputComponent::Move);
+			InjectedEnhancedInputComponent->BindAction(
+				InputActionRow.InputAction,
+				ETriggerEvent::Triggered,
+				this,
+				&UPL_InputComponent::Move
+			);
+
+			InjectedEnhancedInputComponent->BindAction(
+				InputActionRow.InputAction,
+				ETriggerEvent::Completed,
+				this,
+				&UPL_InputComponent::StopMove
+			);
+
+			InjectedEnhancedInputComponent->BindAction(
+				InputActionRow.InputAction,
+				ETriggerEvent::Canceled,
+				this,
+				&UPL_InputComponent::StopMove
+			);
 
 			continue;
 		}
@@ -474,17 +495,39 @@ void UPL_InputComponent::Move(const FInputActionValue& Value)
 	const FVector2D InputVector = Value.Get<FVector2D>();
 
 	const APlayerController* PlayerController = GetOwningPlayerController();
-	if (!PlayerController) return;
+	if (!PlayerController)
+	{
+		SetStrafeFacingRotationActive(false);
+		return;
+	}
+
+	APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!OwnerPawn)
+	{
+		SetStrafeFacingRotationActive(false);
+		return;
+	}
+
+	const bool bHasMoveInput = !InputVector.IsNearlyZero();
+	const bool bCanProcessMoveInput = bHasMoveInput && !PlayerController->IsMoveInputIgnored();
+	SetStrafeFacingRotationActive(bCanProcessMoveInput);
+
+	if (!bCanProcessMoveInput)
+	{
+		return;
+	}
 
 	const FRotator YawRotation(0.f, PlayerController->GetControlRotation().Yaw, 0.f);
 	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-	APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	if (!OwnerPawn) return;
-
 	OwnerPawn->AddMovementInput(ForwardDirection, InputVector.Y);
 	OwnerPawn->AddMovementInput(RightDirection, InputVector.X);
+}
+
+void UPL_InputComponent::StopMove(const FInputActionValue& Value)
+{
+	SetStrafeFacingRotationActive(false);
 }
 
 void UPL_InputComponent::Look(const FInputActionValue& Value)
@@ -532,6 +575,39 @@ void UPL_InputComponent::ApplyZoom()
 			: DefaultCameraOffset;
 		Camera->SetRelativeLocation(CameraOffset);
 	}
+}
+
+void UPL_InputComponent::SetStrafeFacingRotationActive(bool bActive) const
+{
+	ACharacter* CharacterOwner = Cast<ACharacter>(GetOwner());
+	if (!CharacterOwner)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* MoveComp = CharacterOwner->GetCharacterMovement();
+	if (!MoveComp)
+	{
+		return;
+	}
+
+	if (bActive)
+	{
+		if (const AController* CharacterController = CharacterOwner->GetController();
+			CharacterController && CharacterController->IsMoveInputIgnored())
+		{
+			bActive = false;
+		}
+
+		if (const UPL_CharacterMovementComponent* PLMoveComp = Cast<UPL_CharacterMovementComponent>(MoveComp);
+			PLMoveComp && PLMoveComp->IsAbilityMovementInputSuppressed())
+		{
+			bActive = false;
+		}
+	}
+
+	MoveComp->bOrientRotationToMovement = false;
+	MoveComp->bUseControllerDesiredRotation = bActive;
 }
 
 USpringArmComponent* UPL_InputComponent::FindSpringArm() const

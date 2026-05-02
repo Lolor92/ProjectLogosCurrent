@@ -113,9 +113,11 @@ private:
 
 	// Axis handlers.
 	void Move(const FInputActionValue& Value);
+	void StopMove(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void Zoom(const FInputActionValue& Value);
 	void ApplyZoom();
+	void SetStrafeFacingRotationActive(bool bActive) const;
 
 	// Camera helpers.
 	USpringArmComponent* FindSpringArm() const;

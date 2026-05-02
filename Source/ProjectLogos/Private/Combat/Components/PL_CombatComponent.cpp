@@ -7,6 +7,7 @@
 #include "Combat/Runtime/PL_CombatHitWindowRuntime.h"
 #include "Combat/Runtime/PL_CombatTagReactionRuntime.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
@@ -233,6 +234,15 @@ void UPL_CombatComponent::OnCrowdControlTagChanged(const FGameplayTag Tag, int32
 	if (AController* ActorController = OwningCharacter->GetController())
 	{
 		ActorController->SetIgnoreMoveInput(NewCount > 0);
+	}
+
+	if (NewCount > 0)
+	{
+		if (UCharacterMovementComponent* MoveComp = OwningCharacter->GetCharacterMovement())
+		{
+			MoveComp->bUseControllerDesiredRotation = false;
+			MoveComp->bOrientRotationToMovement = false;
+		}
 	}
 }
 
